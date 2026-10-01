@@ -229,30 +229,31 @@ def scrape_google_maps_leads(
 
             # Caso 1: Foi direto para um resultado único (ex.: busca pelo nome exato de um estabelecimento)
             if not is_feed_present:
-                h1_el = page.locator('h1.fontHeadlineLarge, div.fontHeadlineLarge, div[role="main"] h1').first
+                main_panel = page.locator('div[role="main"]').first
+                h1_el = main_panel.locator('h1, h1.fontHeadlineLarge').first
                 if h1_el.count() > 0 and h1_el.is_visible(timeout=3000):
                     if progress_callback:
                         progress_callback("status", "Resultado único detectado. Extraindo dados...")
                     
-                    nome = h1_el.inner_text().strip()
+                    nome = re.sub(r'\(?[^\)]*atualizar resultados[^\)]*\)?', '', h1_el.inner_text().strip(), flags=re.IGNORECASE).strip()
                     
                     # Categoria
-                    cat_el = page.locator('button[jsaction*="category"], div[role="main"] button.DkEaL').first
+                    cat_el = main_panel.locator('button[jsaction*="category"], button.DkEaL').first
                     categoria = cat_el.inner_text().strip() if cat_el.count() > 0 else "Não informada"
                     
                     # Telefone
-                    phone_el = page.locator('button[data-tooltip*="telefone" i], button[data-item-id*="phone"], button[aria-label*="Telefone:" i], a[href^="tel:"]').first
+                    phone_el = main_panel.locator('button[data-tooltip*="telefone" i], button[data-item-id*="phone"], button[aria-label*="Telefone:" i], a[href^="tel:"]').first
                     phone = "Não informado"
                     if phone_el.count() > 0:
                         aria = phone_el.get_attribute("aria-label") or ""
                         phone = clean_phone_number(aria or phone_el.inner_text())
                     
                     # Avaliações
-                    rating_el = page.locator('div.F7nice').first
+                    rating_el = main_panel.locator('div.F7nice').first
                     nota_avaliacoes = rating_el.inner_text().replace('\n', ' ').strip() if rating_el.count() > 0 else "Sem avaliações"
                     
-                    # Website
-                    web_el = page.locator('a[data-item-id="authority"], a[data-tooltip*="site" i], a[aria-label*="Website" i], a[aria-label*="Site" i]').first
+                    # Website estritamente dentro do painel da empresa
+                    web_el = main_panel.locator('a[data-item-id="authority"]').first
                     raw_site = web_el.get_attribute("href") if web_el.count() > 0 else ""
                     website = clean_clean_url(raw_site)
                     
@@ -339,8 +340,10 @@ def scrape_google_maps_leads(
                     # Pausa humana realista para carregamento dos detalhes
                     time.sleep(random.uniform(pause_min, pause_max))
 
+                    main_panel = page.locator('div[role="main"]').first
+
                     # 1. Nome da Empresa
-                    h1_el = page.locator('div[role="main"] h1, h1.fontHeadlineLarge').first
+                    h1_el = main_panel.locator('h1').first
                     nome = ""
                     if h1_el.count() > 0:
                         try:
@@ -352,6 +355,10 @@ def scrape_google_maps_leads(
                     if not nome:
                         nome = card_aria_name or f"Empresa #{i+1}"
 
+                    # Limpeza de ruídos (como texto de checkbox do mapa)
+                    nome = re.sub(r'[\r\n\t]+', ' ', nome)
+                    nome = re.sub(r'\(?[^\)]*atualizar resultados[^\)]*\)?', '', nome, flags=re.IGNORECASE).strip()
+
                     # Evitar duplicados caso o feed reordene
                     if nome in processed_names:
                         continue
@@ -360,7 +367,7 @@ def scrape_google_maps_leads(
                     # 2. Categoria
                     categoria = "Não informada"
                     try:
-                        cat_el = page.locator('button[jsaction*="category"], div[role="main"] button.DkEaL, div.fontBodyMedium button').first
+                        cat_el = main_panel.locator('button[jsaction*="category"], button.DkEaL, div.fontBodyMedium button').first
                         if cat_el.count() > 0:
                             cat_text = cat_el.inner_text().strip()
                             if cat_text:
@@ -371,10 +378,10 @@ def scrape_google_maps_leads(
                     # 3. Telefone / WhatsApp
                     telefone = "Não informado"
                     try:
-                        phone_el = page.locator('button[data-tooltip*="telefone" i], button[data-item-id*="phone"], button[aria-label*="Telefone:" i], a[href^="tel:"]').first
+                        phone_el = main_panel.locator('button[data-tooltip*="telefone" i], button[data-item-id*="phone"], button[aria-label*="Telefone:" i], a[href^="tel:"]').first
                         if phone_el.count() > 0:
                             aria = phone_el.get_attribute("aria-label") or ""
-                            txt = phone_el.inner_text()
+                            txt = phone_el.inner_text().strip()
                             telefone = clean_phone_number(aria or txt)
                     except Exception:
                         pass
@@ -382,22 +389,22 @@ def scrape_google_maps_leads(
                     # 4. Nota e Total de Avaliações
                     nota_avaliacoes = "Sem avaliações"
                     try:
-                        rating_el = page.locator('div.F7nice').first
+                        rating_el = main_panel.locator('div.F7nice').first
                         if rating_el.count() > 0:
                             raw_rating = rating_el.inner_text().replace('\n', ' ').strip()
                             if raw_rating:
                                 nota_avaliacoes = raw_rating
                         else:
-                            star_el = page.locator('span[role="img"][aria-label*="estrelas"]').first
+                            star_el = main_panel.locator('span[role="img"][aria-label*="estrelas"]').first
                             if star_el.count() > 0:
                                 nota_avaliacoes = star_el.get_attribute("aria-label") or "Sem avaliações"
                     except Exception:
                         pass
 
-                    # 5. Website
+                    # 5. Website estritamente dentro do painel da empresa selecionada
                     website = ""
                     try:
-                        web_el = page.locator('a[data-item-id="authority"], a[data-tooltip*="site" i], a[aria-label*="Website" i], a[aria-label*="Site" i]').first
+                        web_el = main_panel.locator('a[data-item-id="authority"]').first
                         if web_el.count() > 0:
                             raw_site = web_el.get_attribute("href") or ""
                             website = clean_clean_url(raw_site)
