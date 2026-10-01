@@ -33,7 +33,13 @@ Painel local interativo de extração de leads comerciais do Google Maps desenvo
 ```
 google_maps_leads/
 ├── .venv/               # Ambiente virtual Python
-├── app.py               # Código completo da aplicação (Streamlit + Playwright)
+├── scraper.py           # Módulo isolado de extração e inteligência comercial
+├── server.py            # Servidor FastAPI de alta performance para a aplicação web
+├── static/              # Frontend moderno (UrTask inspired)
+│   ├── index.html       # Estrutura HTML5 com onboarding guiado e painel de leads
+│   ├── style.css        # CSS moderno (Dark Cosmic, Glassmorphism, Neon Glow)
+│   └── app.js           # Engine interativo SPA, filtros e gatilhos de WhatsApp/E-mail
+├── app.py               # Interface Streamlit clássica (preservada)
 ├── requirements.txt     # Dependências do projeto
 └── README.md            # Documentação e instruções de uso
 ```
@@ -58,8 +64,25 @@ pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-### 4. Iniciar o Painel Streamlit
+### 4. Iniciar o Novo Frontend Moderno (SaaS - UrTask Design) ⭐ [Recomendado]
+```powershell
+.\.venv\Scripts\python.exe server.py
+```
+Acesse no seu navegador: `http://localhost:8000`
+
+✨ **Destaques do Novo Frontend:**
+- **Página Inicial sem Cadastro Prévio**: Apresentação visual de alto nível com demonstração dinâmica.
+- **Onboarding Guiado em 3 Etapas**: Passo a passo interativo com onda conectora e botão "Continuar Etapa".
+- **Aba de Leads com Otimização de Contato**:
+  - 🟢 **Botão WhatsApp com 1 Clique**: abre diretamente a conversa com mensagem comercial inteligente adaptada ao status do lead.
+  - ✉️ **Botão E-mail com 1 Clique**: abre o cliente de e-mail com proposta pronta.
+  - 💬 **Personalizador de Mensagens / Pitch Modal**: alterne entre tons (consultivo, direto, promocional) antes de enviar.
+- **Exportação Rápida**: CSV (UTF-8 BOM para Excel) e Excel (.xlsx).
+
+---
+
+### 5. Iniciar o Painel Streamlit Clássico (Opcional)
 ```powershell
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
-O painel abrirá automaticamente no navegador no endereço `http://localhost:8501`.
+O painel Streamlit abrirá em `http://localhost:8501`.
