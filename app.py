@@ -10,18 +10,26 @@ import pandas as pd
 import streamlit as st
 from playwright.sync_api import sync_playwright
 
-# Garante que o Chromium do Playwright esteja instalado mesmo em ambientes de nuvem (Streamlit Cloud, Render, etc.)
+# Garante que o Chromium do Playwright esteja instalado e disponível (Streamlit Cloud, Linux, etc.)
+@st.cache_resource(show_spinner="Preparando navegador Chromium para o ambiente...")
 def ensure_playwright_browsers():
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
-            # Tenta verificar se o executável do chromium existe
-            pass
+            # Testa se o Chromium consegue inicializar
+            b = p.chromium.launch(headless=True)
+            b.close()
+            return True
     except Exception:
+        # Se não encontrou o executável, instala automaticamente
         try:
             subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
         except Exception:
-            pass
+            try:
+                subprocess.run(["playwright", "install", "chromium"], check=True)
+            except Exception:
+                pass
+        return True
 
 ensure_playwright_browsers()
 
@@ -156,16 +164,27 @@ def scrape_google_maps_leads(
     search_url = f"https://www.google.com/maps/search/{encoded_query}?hl=pt-BR"
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=headless,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--lang=pt-BR",
-            ]
-        )
+        browser_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+            "--lang=pt-BR",
+        ]
+        try:
+            browser = p.chromium.launch(headless=headless, args=browser_args)
+        except Exception as launch_err:
+            # Se faltar o executável do navegador, instala na hora
+            if "Executable doesn't exist" in str(launch_err) or "playwright install" in str(launch_err):
+                if progress_callback:
+                    progress_callback("status", "Configurando e baixando navegador Chromium no servidor...")
+                try:
+                    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+                except Exception:
+                    subprocess.run(["playwright", "install", "chromium"], check=True)
+                browser = p.chromium.launch(headless=headless, args=browser_args)
+            else:
+                raise launch_err
         context = browser.new_context(
             viewport={"width": 1366, "height": 850},
             locale="pt-BR",
