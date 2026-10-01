@@ -1,12 +1,29 @@
 import io
 import os
 import re
+import sys
 import time
 import random
+import subprocess
 import urllib.parse
 import pandas as pd
 import streamlit as st
 from playwright.sync_api import sync_playwright
+
+# Garante que o Chromium do Playwright esteja instalado mesmo em ambientes de nuvem (Streamlit Cloud, Render, etc.)
+def ensure_playwright_browsers():
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            # Tenta verificar se o executável do chromium existe
+            pass
+    except Exception:
+        try:
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+        except Exception:
+            pass
+
+ensure_playwright_browsers()
 
 # ---------------------------------------------------------
 # Configuração da Página Streamlit
