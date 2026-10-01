@@ -1,0 +1,30 @@
+# Ambientes Virtuais
+.venv/
+env/
+venv/
+ENV/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Arquivos de Dados e Exportações Geradas
+*.csv
+*.xlsx
+*.xls
+
+# Logs e arquivos temporários
+*.log
+.system_generated/
+scratch/
+
+# IDE e Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# SO
+.DS_Store
+Thumbs.db
