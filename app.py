@@ -41,12 +41,11 @@ st.markdown("""
     .main-header {
         font-size: 2.2rem;
         font-weight: 700;
-        color: #1E293B;
         margin-bottom: 0.2rem;
     }
     .sub-header {
         font-size: 1.05rem;
-        color: #64748B;
+        opacity: 0.8;
         margin-bottom: 1.5rem;
     }
     .metric-card {
