@@ -252,6 +252,18 @@ def scrape_google_maps_leads(
                     rating_el = main_panel.locator('div.F7nice').first
                     nota_avaliacoes = rating_el.inner_text().replace('\n', ' ').strip() if rating_el.count() > 0 else "Sem avaliações"
                     
+                    # Horário de Funcionamento
+                    horario = "Não informado"
+                    try:
+                        hours_el = main_panel.locator('div[aria-label*="horas" i], div[aria-label*="Aberto" i], div[aria-label*="Fechado" i], button[data-item-id="oh"]').first
+                        if hours_el.count() > 0:
+                            h_aria = hours_el.get_attribute("aria-label") or ""
+                            h_txt = hours_el.inner_text().strip()
+                            horario = h_aria or h_txt
+                            horario = re.sub(r'[\r\n\t]+', ' ', horario).strip()
+                    except Exception:
+                        pass
+
                     # Website estritamente dentro do painel da empresa
                     web_el = main_panel.locator('a[data-item-id="authority"]').first
                     raw_site = web_el.get_attribute("href") if web_el.count() > 0 else ""
@@ -263,6 +275,7 @@ def scrape_google_maps_leads(
                         "Nome da Empresa": nome,
                         "Categoria": categoria,
                         "Telefone / WhatsApp": phone,
+                        "Horário de Funcionamento": horario,
                         "Nota e Total de Avaliações": nota_avaliacoes,
                         "Website": website if website else "-",
                         "Status do Lead": status_lead
@@ -289,23 +302,21 @@ def scrape_google_maps_leads(
             max_scroll_attempts = max(10, int(max_results * 1.5))
 
             while scroll_attempts < max_scroll_attempts:
-                current_links = page.locator('div[role="feed"] a[href*="/maps/place/"]').count()
-                if current_links >= max_results:
+                current_cards = page.locator('div[role="feed"] div.Nv2PK').count()
+                if current_cards >= max_results:
                     break
 
                 # Rola o elemento do feed para baixo
                 feed.evaluate("el => el.scrollBy(0, 1500)")
                 time.sleep(random.uniform(pause_min, pause_max))
 
-                new_count = page.locator('div[role="feed"] a[href*="/maps/place/"]').count()
+                new_count = page.locator('div[role="feed"] div.Nv2PK').count()
                 if new_count == last_count:
                     consecutive_no_growth += 1
-                    # Tenta forçar scroll com mouse wheel
                     feed.hover()
                     page.mouse.wheel(0, 2000)
                     time.sleep(1.0)
                     if consecutive_no_growth >= 3:
-                        # Fim da lista atingido
                         break
                 else:
                     consecutive_no_growth = 0
@@ -315,9 +326,9 @@ def scrape_google_maps_leads(
                 if progress_callback:
                     progress_callback("status", f"Carregando feed de empresas ({min(new_count, max_results)}/{max_results} encontradas)...")
 
-            # Quantidade efetiva de itens a extrair
-            all_links = page.locator('div[role="feed"] a[href*="/maps/place/"]')
-            total_available = all_links.count()
+            # Quantidade efetiva de cards a extrair
+            all_cards = page.locator('div[role="feed"] div.Nv2PK')
+            total_available = all_cards.count()
             total_to_process = min(max_results, total_available)
 
             if progress_callback:
@@ -327,97 +338,105 @@ def scrape_google_maps_leads(
 
             for i in range(total_to_process):
                 try:
-                    link_locator = page.locator('div[role="feed"] a[href*="/maps/place/"]').nth(i)
+                    card = all_cards.nth(i)
+                    place_link = card.locator('a[href*="/maps/place/"]').first
                     
                     # Nome garantido via aria-label do link do card
-                    card_aria_name = link_locator.get_attribute("aria-label") or ""
-                    
-                    # Rola o card para visualização e clica
-                    link_locator.scroll_into_view_if_needed(timeout=3000)
-                    time.sleep(random.uniform(0.3, 0.6))
-                    link_locator.click()
-                    
-                    # Pausa humana realista para carregamento dos detalhes
-                    time.sleep(random.uniform(pause_min, pause_max))
-
-                    main_panel = page.locator('div[role="main"]').first
-
-                    # 1. Nome da Empresa
-                    h1_el = main_panel.locator('h1').first
-                    nome = ""
-                    if h1_el.count() > 0:
-                        try:
-                            nome_text = h1_el.inner_text().strip()
-                            if nome_text and nome_text.lower() != "resultados":
-                                nome = nome_text
-                        except Exception:
-                            pass
-                    if not nome:
-                        nome = card_aria_name or f"Empresa #{i+1}"
-
-                    # Limpeza de ruídos (como texto de checkbox do mapa)
-                    nome = re.sub(r'[\r\n\t]+', ' ', nome)
+                    raw_name = place_link.get_attribute("aria-label") or ""
+                    nome = re.sub(r'[\r\n\t]+', ' ', raw_name)
                     nome = re.sub(r'\(?[^\)]*atualizar resultados[^\)]*\)?', '', nome, flags=re.IGNORECASE).strip()
+                    if not nome:
+                        nome = f"Empresa #{i+1}"
 
-                    # Evitar duplicados caso o feed reordene
+                    # Evitar duplicados
                     if nome in processed_names:
                         continue
                     processed_names.add(nome)
 
-                    # 2. Categoria
-                    categoria = "Não informada"
-                    try:
-                        cat_el = main_panel.locator('button[jsaction*="category"], button.DkEaL, div.fontBodyMedium button').first
-                        if cat_el.count() > 0:
-                            cat_text = cat_el.inner_text().strip()
-                            if cat_text:
-                                categoria = cat_text
-                    except Exception:
-                        pass
+                    # 1. Website direto do card (100% isolado por empresa)
+                    site_btn = card.locator('a[data-value="Website"], a[aria-label*="Acessar o site" i], a[aria-label*="Website" i]').first
+                    card_site = ""
+                    if site_btn.count() > 0:
+                        card_site = clean_clean_url(site_btn.get_attribute("href") or "")
 
-                    # 3. Telefone / WhatsApp
-                    telefone = "Não informado"
-                    try:
-                        phone_el = main_panel.locator('button[data-tooltip*="telefone" i], button[data-item-id*="phone"], button[aria-label*="Telefone:" i], a[href^="tel:"]').first
-                        if phone_el.count() > 0:
-                            aria = phone_el.get_attribute("aria-label") or ""
-                            txt = phone_el.inner_text().strip()
-                            telefone = clean_phone_number(aria or txt)
-                    except Exception:
-                        pass
-
-                    # 4. Nota e Total de Avaliações
+                    # 2. Avaliações no card
+                    rating_span = card.locator('span.MW4etd').first
+                    reviews_span = card.locator('span.UY7F9').first
                     nota_avaliacoes = "Sem avaliações"
-                    try:
-                        rating_el = main_panel.locator('div.F7nice').first
-                        if rating_el.count() > 0:
-                            raw_rating = rating_el.inner_text().replace('\n', ' ').strip()
-                            if raw_rating:
-                                nota_avaliacoes = raw_rating
-                        else:
-                            star_el = main_panel.locator('span[role="img"][aria-label*="estrelas"]').first
-                            if star_el.count() > 0:
-                                nota_avaliacoes = star_el.get_attribute("aria-label") or "Sem avaliações"
-                    except Exception:
-                        pass
+                    if rating_span.count() > 0:
+                        r_txt = rating_span.inner_text().strip()
+                        rev_txt = reviews_span.inner_text().strip() if reviews_span.count() > 0 else ""
+                        nota_avaliacoes = f"{r_txt} {rev_txt}".strip()
 
-                    # 5. Website estritamente dentro do painel da empresa selecionada
-                    website = ""
-                    try:
-                        web_el = main_panel.locator('a[data-item-id="authority"]').first
-                        if web_el.count() > 0:
-                            raw_site = web_el.get_attribute("href") or ""
-                            website = clean_clean_url(raw_site)
-                    except Exception:
-                        pass
+                    # 3. Clica na empresa para carregar painel lateral de detalhes
+                    place_link.scroll_into_view_if_needed(timeout=3000)
+                    time.sleep(random.uniform(0.2, 0.4))
+                    place_link.click()
 
-                    # 6. Status do Lead
+                    # Aguarda a renderização do painel lateral
+                    try:
+                        page.locator('div[role="main"]').first.wait_for(timeout=3000)
+                        time.sleep(random.uniform(pause_min, pause_max))
+                    except Exception:
+                        time.sleep(1.0)
+
+                    panel = page.locator('div[role="main"]').first
+
+                    # Confirmação de Website no painel (se não tiver no card)
+                    website = card_site
+                    if not website and panel.count() > 0:
+                        try:
+                            panel_site_el = panel.locator('a[data-item-id="authority"]').first
+                            if panel_site_el.count() > 0:
+                                website = clean_clean_url(panel_site_el.get_attribute("href") or "")
+                        except Exception:
+                            pass
+
+                    # 4. Telefone / WhatsApp no painel
+                    telefone = "Não informado"
+                    if panel.count() > 0:
+                        try:
+                            phone_el = panel.locator('button[data-tooltip*="telefone" i], button[data-item-id*="phone"], button[aria-label*="Telefone:" i], a[href^="tel:"]').first
+                            if phone_el.count() > 0:
+                                aria = phone_el.get_attribute("aria-label") or ""
+                                txt = phone_el.inner_text().strip()
+                                telefone = clean_phone_number(aria or txt)
+                        except Exception:
+                            pass
+
+                    # 5. Categoria no painel
+                    categoria = "Não informada"
+                    if panel.count() > 0:
+                        try:
+                            cat_el = panel.locator('button[jsaction*="category"], button.DkEaL, div.fontBodyMedium button').first
+                            if cat_el.count() > 0:
+                                cat_text = cat_el.inner_text().strip()
+                                if cat_text:
+                                    categoria = cat_text
+                        except Exception:
+                            pass
+
+                    # 6. Horário de Funcionamento
+                    horario = "Não informado"
+                    if panel.count() > 0:
+                        try:
+                            hours_el = panel.locator('div[aria-label*="horas" i], div[aria-label*="Aberto" i], div[aria-label*="Fechado" i], button[data-item-id="oh"]').first
+                            if hours_el.count() > 0:
+                                h_aria = hours_el.get_attribute("aria-label") or ""
+                                h_txt = hours_el.inner_text().strip()
+                                horario = h_aria or h_txt
+                                horario = re.sub(r'[\r\n\t]+', ' ', horario).strip()
+                        except Exception:
+                            pass
+
+                    # 7. Status do Lead
                     status_lead = classify_lead_status(website)
 
                     lead_record = {
                         "Nome da Empresa": nome,
                         "Categoria": categoria,
                         "Telefone / WhatsApp": telefone,
+                        "Horário de Funcionamento": horario,
                         "Nota e Total de Avaliações": nota_avaliacoes,
                         "Website": website if website else "-",
                         "Status do Lead": status_lead
@@ -515,8 +534,9 @@ def main():
                 )
                 # Amostra dos últimos coletados
                 preview_df = pd.DataFrame(temp_leads)
+                preview_cols = [c for c in ["Nome da Empresa", "Telefone / WhatsApp", "Horário de Funcionamento", "Website", "Status do Lead"] if c in preview_df.columns]
                 live_preview.dataframe(
-                    preview_df[["Nome da Empresa", "Telefone / WhatsApp", "Website", "Status do Lead"]].tail(5),
+                    preview_df[preview_cols].tail(5),
                     use_container_width=True,
                     hide_index=True
                 )
@@ -606,6 +626,7 @@ def main():
                 "Nome da Empresa": st.column_config.TextColumn("Nome da Empresa", width="medium"),
                 "Categoria": st.column_config.TextColumn("Categoria", width="small"),
                 "Telefone / WhatsApp": st.column_config.TextColumn("Telefone / WhatsApp", width="small"),
+                "Horário de Funcionamento": st.column_config.TextColumn("Horário de Funcionamento", width="medium"),
                 "Nota e Total de Avaliações": st.column_config.TextColumn("Avaliações", width="small"),
                 "Website": st.column_config.LinkColumn("Website", width="medium"),
                 "Status do Lead": st.column_config.TextColumn("Status do Lead", width="medium")
