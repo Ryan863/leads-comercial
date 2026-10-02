@@ -1,30 +1,40 @@
-# Ambientes Virtuais
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Python & Venv
+backend/.venv/
 .venv/
 env/
-venv/
-ENV/
-
-# Python Cache
 __pycache__/
+*/__pycache__/
 *.py[cod]
 *$py.class
 
-# Arquivos de Dados e Exportações Geradas
-*.csv
-*.xlsx
-*.xls
+# Environment variables
+.env
+.env*.local
 
-# Logs e arquivos temporários
+# Logs
 *.log
-.system_generated/
-scratch/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# IDE e Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# SO
+# OS / Editor
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
+
+# V0 / Sandbox
+__v0_*
+.snowflake/
+.v0-trash/
+.vercel/

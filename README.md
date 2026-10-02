@@ -1,88 +1,84 @@
-# 📍 Leads Radar - Extrator Comercial do Google Maps
+# 📡 LeadRadar — Radar de Captação de Leads Comerciais B2B
 
-Painel local interativo de extração de leads comerciais do Google Maps desenvolvido com **Python**, **Streamlit**, **Playwright** e **Pandas**.
-
----
-
-## 🚀 Funcionalidades
-
-- **Busca Flexível**: Permite pesquisar por qualquer nicho e localidade (ex.: `Pizzarias em Videira - SC`, `Clínicas Odontológicas em São Paulo`, `Mecânicas em Curitiba`).
-- **Controle de Quantidade**: Seletor numérico para definir a quantidade máxima de leads a extrair (ex.: 20, 50, 100).
-- **Extração Completa**:
-  - Nome da Empresa
-  - Categoria
-  - Telefone / WhatsApp
-  - Nota e Total de Avaliações
-  - Website
-  - **Status do Lead**:
-    - 🚨 `Sem Site - Alta Prioridade`: Empresas sem website cadastrado (oportunidade imediata para venda de sites/landing pages).
-    - 📱 `Usa Rede Social`: Empresas que usam links de Instagram, Facebook ou WhatsApp como página principal.
-    - 🌐 `Tem Site`: Empresas que já possuem domínio próprio.
-- **Prevenção de Bloqueios**: Execução em modo `headless=True` com pausas humanas realistas configuráveis.
-- **Tolerância a Falhas**: Tratamento de exceções que impede travamentos por dados ausentes (empresas sem telefone ou site).
-- **Acompanhamento em Tempo Real**: Barra de progresso dinâmica, status em tempo real e prévia dos últimos leads capturados.
-- **Filtros Interativos**: Filtragem por status do lead e busca textual dinâmica na tabela de resultados.
-- **Exportação Rápida**:
-  - Download em formato **CSV** (otimizado com codificação UTF-8 com BOM para Excel no Windows).
-  - Download em formato **Excel (.xlsx)** com largura de colunas ajustadas automaticamente.
+Micro-SaaS moderno de prospecção ativa local e B2B sob demanda, com motor próprio de automação/scraping em tempo real (zero custos de APIs externas como Google Places).
 
 ---
 
-## 📦 Estrutura do Projeto
+## ⚡ Diferenciais do Sistema
 
-```
-google_maps_leads/
-├── .venv/               # Ambiente virtual Python
-├── scraper.py           # Módulo isolado de extração e inteligência comercial
-├── server.py            # Servidor FastAPI de alta performance para a aplicação web
-├── static/              # Frontend moderno (UrTask inspired)
-│   ├── index.html       # Estrutura HTML5 com onboarding guiado e painel de leads
-│   ├── style.css        # CSS moderno (Dark Cosmic, Glassmorphism, Neon Glow)
-│   └── app.js           # Engine interativo SPA, filtros e gatilhos de WhatsApp/E-mail
-├── app.py               # Interface Streamlit clássica (preservada)
-├── requirements.txt     # Dependências do projeto
-└── README.md            # Documentação e instruções de uso
-```
+- **Zero Custo de API:** Automação headless via **Playwright Stealth** no Google Maps e fallback resiliente em diretórios públicos (OpenStreetMap). Sem cobranças no Google Cloud.
+- **Identificação de Empresas "Sem Site":** Filtro inteligente que destaca comércios sem presença digital ou com redes sociais precárias (leads com maior taxa de conversão para agências, freelancers e empresas de tecnologia).
+- **Streaming em Tempo Real (SSE):** Resultados transmitidos via *Server-Sent Events* e renderizados lead-a-lead a 60fps na tela com microinterações fluidas.
+- **Abordagem Comercial em 1 Clique:** Detecção de celular/WhatsApp para abertura instantânea de conversas com mensagem personalizada.
+- **Exportação Flexível:** Download direto para CSV (compatível com Excel brasileiro via UTF-8 BOM) ou planilha Excel (.xls).
 
 ---
 
-## 🛠️ Como Executar
+## 🛠️ Stack Tecnológica
 
-### 1. Pré-requisitos
-- Python 3.10 ou superior instalado no sistema.
+### Front-end
+- **Next.js 16.3.3** (App Router com Turbopack, React 19)
+- **Tailwind CSS v4** (`@theme inline` com espaço de cores OKLCH e `tw-animate-css`)
+- **Lucide React** & Componentes `@base-ui/react`
+- **ScrollReveal & Animações CSS 60fps** (Staggered entrance na Hero, card-enter no feed e microinterações de hover)
 
-### 2. Ativação do Ambiente Virtual
-No terminal PowerShell:
+### Back-end & Engine de Automação
+- **Python 3.11+ / FastAPI**
+- **Playwright** (execução headless via canais nativos Chrome/Edge com plugins e scripts de evasão stealth)
+- **Server-Sent Events (SSE)** para streaming de dados em tempo real
+- **Fallback Híbrido** com API pública OpenStreetMap (Nominatim/Overpass)
+
+---
+
+## 🚀 Como Executar Localmente
+
+### 1. Iniciar o Back-end de Raspagem (FastAPI / Playwright)
+
+No diretório do projeto:
+
 ```powershell
-cd C:\Users\ryan_varella\.gemini\antigravity\scratch\google_maps_leads
-.\.venv\Scripts\Activate.ps1
-```
+cd backend
 
-### 3. Instalação das Dependências (já realizada)
-```powershell
+# Crie e ative o ambiente virtual (ou use uv)
+python -m venv .venv
+.\.venv\Scripts\activate
+
+# Instale as dependências
 pip install -r requirements.txt
-python -m playwright install chromium
-```
 
-### 4. Iniciar o Novo Frontend Moderno (SaaS - UrTask Design) ⭐ [Recomendado]
+# Inicie o servidor
+python main.py
+```
+> O servidor estará rodando em `http://127.0.0.1:8000`  
+> Documentação Swagger interativa: `http://127.0.0.1:8000/docs`
+
+### 2. Iniciar o Front-end (Next.js)
+
+Em outro terminal, na raiz do projeto:
+
 ```powershell
-.\.venv\Scripts\python.exe server.py
-```
-Acesse no seu navegador: `http://localhost:8000`
+# Instale as dependências
+npm install
 
-✨ **Destaques do Novo Frontend:**
-- **Página Inicial sem Cadastro Prévio**: Apresentação visual de alto nível com demonstração dinâmica.
-- **Onboarding Guiado em 3 Etapas**: Passo a passo interativo com onda conectora e botão "Continuar Etapa".
-- **Aba de Leads com Otimização de Contato**:
-  - 🟢 **Botão WhatsApp com 1 Clique**: abre diretamente a conversa com mensagem comercial inteligente adaptada ao status do lead.
-  - ✉️ **Botão E-mail com 1 Clique**: abre o cliente de e-mail com proposta pronta.
-  - 💬 **Personalizador de Mensagens / Pitch Modal**: alterne entre tons (consultivo, direto, promocional) antes de enviar.
-- **Exportação Rápida**: CSV (UTF-8 BOM para Excel) e Excel (.xlsx).
+# Inicie o servidor de desenvolvimento
+npm run dev
+```
+
+Acesse:
+- **Landing Page:** `http://localhost:3000`
+- **Radar de Leads:** `http://localhost:3000/app`
 
 ---
 
-### 5. Iniciar o Painel Streamlit Clássico (Opcional)
-```powershell
-.\.venv\Scripts\python.exe -m streamlit run app.py
-```
-O painel Streamlit abrirá em `http://localhost:8501`.
+## 🔌 Endpoints da API
+
+- `POST /api/search` — Dispara a busca em segundo plano (`query`, `quantity`, `source`).
+- `GET /api/search/{id}/stream` — Stream SSE em tempo real enviando cada lead extraído.
+- `GET /api/search/{id}/status` — Status e lista de leads acumulados.
+- `GET /api/leads/export?format=csv` ou `?format=excel` — Download formatado para planilhas.
+- `GET /api/health` — Verificação de saúde e modo zero-cost ativo.
+
+---
+
+## 📄 Licença
+Distribuído sob licença proprietária para uso interno do projeto.
