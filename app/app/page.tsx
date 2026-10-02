@@ -5,8 +5,8 @@ import { Logo } from '@/components/logo'
 import { RadarApp } from '@/components/radar/radar-app'
 
 export const metadata: Metadata = {
-  title: 'Radar — LeadRadar',
-  description: 'Varra o Google Maps e encontre leads comerciais prontos para abordar.',
+  title: 'Radar — Sondar',
+  description: 'Varra o Google Maps e encontre leads comerciais B2B prontos para abordar.',
 }
 
 export default function RadarPage() {

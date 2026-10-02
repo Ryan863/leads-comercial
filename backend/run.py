@@ -8,7 +8,7 @@ def main():
     
     python_cmd = venv_python if os.path.exists(venv_python) else sys.executable
 
-    print(f"[*] Iniciando LeadRadar Scraper Backend via: {python_cmd}")
+    print(f"[*] Iniciando Sondar Scraper Backend via: {python_cmd}")
     print("[*] Servidor rodando em: http://127.0.0.1:8000")
     print("[*] Documentação interativa Swagger: http://127.0.0.1:8000/docs")
 

@@ -19,7 +19,7 @@ export function Footer() {
       </div>
       <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-border pt-6 text-sm text-muted-foreground md:flex-row">
         <Logo />
-        <p>{`© ${new Date().getFullYear()} LeadRadar. Todos os direitos reservados.`}</p>
+        <p>{`© ${new Date().getFullYear()} Sondar. Todos os direitos reservados.`}</p>
       </div>
     </footer>
   )

@@ -26,7 +26,7 @@ export function HeroPreview() {
         <span className="size-2.5 rounded-full bg-hot/70" />
         <span className="size-2.5 rounded-full bg-yellow-400/70" />
         <span className="size-2.5 rounded-full bg-success/70" />
-        <span className="ml-3 text-xs text-muted-foreground">app.leadradar.com.br/radar</span>
+        <span className="ml-3 text-xs text-muted-foreground font-mono">app.sondar.com.br/radar</span>
       </div>
 
       <div className="flex">

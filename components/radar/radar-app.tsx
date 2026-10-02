@@ -206,10 +206,10 @@ export function RadarApp() {
           </div>
 
           <h1 className="text-balance text-3xl font-bold tracking-tight text-foreground md:text-4xl">
-            Radar de Leads Comerciais
+            Sondar • Radar de Leads B2B
           </h1>
           <p className="mt-2 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground md:text-base">
-            Varra empresas diretamente dos mapas sem custos de API, filtre quem não tem site e abra conversas imediatas no WhatsApp.
+            Varra empresas diretamente dos mapas sem custos de API, filtre quem não tem site e abra conversas imediatas no WhatsApp. Projeto gratuito sem mensalidades.
           </p>
         </div>
 

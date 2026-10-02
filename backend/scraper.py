@@ -15,7 +15,7 @@ from stealth import (
     get_random_viewport,
 )
 
-logger = logging.getLogger("LeadRadarScraper")
+logger = logging.getLogger("SondarScraper")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
@@ -289,7 +289,7 @@ class LeadScraper:
         # Monta pesquisa no Nominatim
         search_term = f"{niche} {city}".strip()
         url = "https://nominatim.openstreetmap.org/search"
-        headers = {"User-Agent": "LeadRadar-B2B-Prospector/1.0 (contact@leadradar.local)"}
+        headers = {"User-Agent": "Sondar-B2B-Prospector/1.0 (contact@sondar.local)"}
         params = {
             "q": search_term,
             "format": "json",

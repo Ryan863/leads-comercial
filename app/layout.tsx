@@ -7,15 +7,14 @@ const jakarta = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-jakart
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono' })
 
 export const metadata: Metadata = {
-  title: 'LeadRadar — Radar de Leads Comerciais',
+  title: 'Sondar — Radar de Leads B2B',
   description:
-    'Encontre empresas no Google Maps, identifique quem não tem site e inicie conversas via WhatsApp ou e-mail em um clique.',
-  generator: 'v0.app',
+    'Sondar é o radar de prospecção comercial B2B sob demanda. Extraia empresas reais dos mapas, filtre quem não tem site e inicie conversas no WhatsApp em 1 clique.',
   icons: {
     icon: [
       { url: '/icon-light-32x32.png', media: '(prefers-color-scheme: light)' },
       { url: '/icon-dark-32x32.png', media: '(prefers-color-scheme: dark)' },
-      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/sondar-icon.png', type: 'image/png' },
     ],
     apple: '/apple-icon.png',
   },

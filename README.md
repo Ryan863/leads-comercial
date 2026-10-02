@@ -1,4 +1,4 @@
-# 📡 LeadRadar — Radar de Captação de Leads Comerciais B2B
+# 📡 Sondar — Radar de Leads B2B
 
 Micro-SaaS moderno de prospecção ativa local e B2B sob demanda, com motor próprio de automação/scraping em tempo real (zero custos de APIs externas como Google Places).
 

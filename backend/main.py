@@ -11,8 +11,8 @@ from scraper import LeadScraper
 from exporter import export_to_csv, export_to_excel_html
 
 app = FastAPI(
-    title="LeadRadar Scraper Engine API",
-    description="Motor de busca e raspagem B2B headless sob demanda sem custos de API externa",
+    title="Sondar Scraper Engine API",
+    description="Motor de busca e raspagem B2B headless sob demanda do Sondar sem custos de API externa",
     version="1.0.0",
 )
 

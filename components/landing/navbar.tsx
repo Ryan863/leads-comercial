@@ -4,8 +4,7 @@ import { Logo } from '@/components/logo'
 const links = [
   { href: '#recursos', label: 'Recursos' },
   { href: '#como-funciona', label: 'Como funciona' },
-  { href: '#depoimentos', label: 'Vantagens Beta' },
-  { href: '#planos', label: 'Condições' },
+  { href: '#depoimentos', label: 'Vantagens' },
 ]
 
 export function Navbar() {
