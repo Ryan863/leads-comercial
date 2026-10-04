@@ -5,8 +5,9 @@ import { Check, Copy, X } from 'lucide-react'
 import type { Lead } from '@/lib/leads'
 
 function pitch(lead: Lead) {
+  const ratingText = lead.rating != null ? ` (${lead.rating.toFixed(1)}⭐)` : ''
   if (lead.presence === 'none')
-    return `Olá! Vi que a ${lead.name} tem ótimas avaliações no Google (${lead.rating.toFixed(1)}⭐), mas ainda não possui um site. Posso te mostrar como um site profissional pode trazer mais clientes?`
+    return `Olá! Vi que a ${lead.name} tem presença no Google${ratingText}, mas ainda não possui um site próprio. Posso te mostrar como um site profissional pode trazer mais clientes?`
   if (lead.presence === 'social')
     return `Olá! Acompanhei o perfil da ${lead.name} nas redes sociais. Que tal ter um site próprio para converter seus seguidores em clientes? Posso te enviar uma proposta rápida?`
   return `Olá! Analisei o site da ${lead.name} e identifiquei oportunidades para aumentar suas vendas online. Posso compartilhar um diagnóstico gratuito?`

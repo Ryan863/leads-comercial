@@ -265,7 +265,7 @@ export function RadarApp() {
               Exibindo <span className="font-semibold text-foreground">{visible.length}</span> leads encontrados
               <span className="hidden md:inline">{` para "${scannedQuery}"`}</span>
             </p>
-            <ExportActions leads={visible} />
+            <ExportActions leads={visible} query={scannedQuery || query} />
           </div>
 
           {visible.length === 0 ? (

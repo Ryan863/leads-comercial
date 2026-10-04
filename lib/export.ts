@@ -2,7 +2,7 @@ import type { Lead } from './leads'
 
 const PRESENCE_LABEL = { none: 'Sem site', social: 'Rede social', site: 'Site próprio' } as const
 
-const HEADERS = ['Nome', 'Categoria', 'Telefone', 'WhatsApp', 'E-mail', 'Avaliação', 'Avaliações', 'Presença', 'Website', 'Endereço']
+const HEADERS = ['Nome', 'Categoria', 'Telefone', 'WhatsApp', 'E-mail', 'Avaliação', 'Avaliações', 'Horários da Semana', 'Presença', 'Website', 'Endereço']
 
 function toRows(leads: Lead[]) {
   return leads.map((l) => [
@@ -11,12 +11,51 @@ function toRows(leads: Lead[]) {
     l.phone,
     l.whatsapp ? 'Sim' : 'Não',
     l.email ?? '',
-    String(l.rating).replace('.', ','),
-    String(l.reviews),
+    l.rating != null ? String(l.rating).replace('.', ',') : '',
+    l.reviews != null ? String(l.reviews) : '0',
+    l.hours_text ?? 'Não informado',
     PRESENCE_LABEL[l.presence],
     l.website ?? '',
     l.address,
   ])
+}
+
+function sanitizeSlug(text: string): string {
+  if (!text) return 'geral'
+  return text
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'geral'
+}
+
+export function buildExportFilename(query?: string, ext: 'csv' | 'xls' = 'csv'): string {
+  let niche = 'leads'
+  let city = 'geral'
+
+  if (query) {
+    const parts = query.split(/\sem\s/i)
+    if (parts.length > 1) {
+      niche = parts[0].trim()
+      city = parts[1].trim()
+    } else if (query.includes('-')) {
+      const sub = query.split('-')
+      niche = sub[0].trim()
+      city = sub.slice(1).join('-').trim()
+    } else {
+      niche = query.trim()
+    }
+  }
+
+  const sNiche = sanitizeSlug(niche)
+  const sCity = sanitizeSlug(city)
+
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+
+  return `leads_${sNiche}_${sCity}_${timestamp}.${ext}`
 }
 
 function download(content: string, filename: string, type: string) {
@@ -29,20 +68,22 @@ function download(content: string, filename: string, type: string) {
   URL.revokeObjectURL(url)
 }
 
-export function exportCsv(leads: Lead[]) {
+export function exportCsv(leads: Lead[], query?: string) {
   const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
   const csv = [HEADERS, ...toRows(leads)].map((r) => r.map(escape).join(';')).join('\n')
-  download(csv, 'leads-radar.csv', 'text/csv;charset=utf-8')
+  const filename = buildExportFilename(query, 'csv')
+  download(csv, filename, 'text/csv;charset=utf-8')
 }
 
-export function exportExcel(leads: Lead[]) {
+export function exportExcel(leads: Lead[], query?: string) {
   const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const head = `<tr>${HEADERS.map((h) => `<th>${h}</th>`).join('')}</tr>`
   const body = toRows(leads)
     .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)
     .join('')
   const html = `<html><head><meta charset="utf-8"></head><body><table>${head}${body}</table></body></html>`
-  download(html, 'leads-radar.xls', 'application/vnd.ms-excel')
+  const filename = buildExportFilename(query, 'xls')
+  download(html, filename, 'application/vnd.ms-excel')
 }
 
 export async function copyPhones(leads: Lead[]) {

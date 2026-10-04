@@ -5,7 +5,7 @@ import { Check, Copy, FileSpreadsheet, FileText } from 'lucide-react'
 import type { Lead } from '@/lib/leads'
 import { copyPhones, exportCsv, exportExcel } from '@/lib/export'
 
-export function ExportActions({ leads }: { leads: Lead[] }) {
+export function ExportActions({ leads, query }: { leads: Lead[]; query?: string }) {
   const [copied, setCopied] = useState(false)
   const disabled = leads.length === 0
 
@@ -14,11 +14,11 @@ export function ExportActions({ leads }: { leads: Lead[] }) {
 
   return (
     <div className="flex flex-wrap gap-2">
-      <button type="button" disabled={disabled} onClick={() => exportCsv(leads)} className={base}>
+      <button type="button" disabled={disabled} onClick={() => exportCsv(leads, query)} className={base}>
         <FileText className="size-4" aria-hidden="true" />
         Exportar CSV
       </button>
-      <button type="button" disabled={disabled} onClick={() => exportExcel(leads)} className={base}>
+      <button type="button" disabled={disabled} onClick={() => exportExcel(leads, query)} className={base}>
         <FileSpreadsheet className="size-4" aria-hidden="true" />
         Exportar Excel
       </button>

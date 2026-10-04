@@ -1,22 +1,41 @@
 import os
 import sys
 import subprocess
+from dotenv import load_dotenv
 
 def main():
     backend_dir = os.path.dirname(os.path.abspath(__file__))
-    venv_python = os.path.join(backend_dir, ".venv", "Scripts", "python.exe")
+    load_dotenv(os.path.join(backend_dir, ".env"))
+
+    host = os.getenv("HOST", "127.0.0.1")
+    port = os.getenv("PORT", "8000")
+
+    # Detecta interpretador do ambiente virtual se existir
+    venv_python_win = os.path.join(backend_dir, ".venv", "Scripts", "python.exe")
+    venv_python_unix = os.path.join(backend_dir, ".venv", "bin", "python")
     
-    python_cmd = venv_python if os.path.exists(venv_python) else sys.executable
+    if os.path.exists(venv_python_win):
+        python_cmd = venv_python_win
+    elif os.path.exists(venv_python_unix):
+        python_cmd = venv_python_unix
+    else:
+        python_cmd = sys.executable
 
-    print(f"[*] Iniciando Sondar Scraper Backend via: {python_cmd}")
-    print("[*] Servidor rodando em: http://127.0.0.1:8000")
-    print("[*] Documentação interativa Swagger: http://127.0.0.1:8000/docs")
+    print("=" * 60)
+    print("  🚀 SONDAR SCRAPER & RADAR ENGINE BACKEND")
+    print("=" * 60)
+    print(f"  • Interpretador Python : {python_cmd}")
+    print(f"  • Servidor API         : http://{host}:{port}")
+    print(f"  • Health Check         : http://{host}:{port}/api/health")
+    print(f"  • Documentação Swagger : http://{host}:{port}/docs")
+    print("=" * 60)
+    print("  Pressione Ctrl+C para encerrar o servidor a qualquer momento.\n")
 
-    cmd = [python_cmd, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000", "--reload"]
+    cmd = [python_cmd, "-m", "uvicorn", "main:app", "--host", host, "--port", port, "--loop", "asyncio"]
     try:
         subprocess.run(cmd, cwd=backend_dir)
     except KeyboardInterrupt:
-        print("\n[*] Servidor encerrado.")
+        print("\n[*] Servidor encerrado com sucesso pelo usuário.")
 
 if __name__ == "__main__":
     main()

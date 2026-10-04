@@ -108,7 +108,7 @@ export function LeadCard({ lead, onNote }: { lead: Lead; onNote: (l: Lead) => vo
           <dt className="text-xs text-muted-foreground">Avaliações Google:</dt>
           <dd className="mt-0.5 flex items-center gap-1 font-semibold">
             <Star className="size-4 fill-yellow-400 text-yellow-400" aria-hidden="true" />
-            {`${lead.rating.toFixed(1)} (${lead.reviews} avaliações)`}
+            {lead.rating != null ? `${lead.rating.toFixed(1)} (${lead.reviews} avaliações)` : 'Sem avaliações'}
           </dd>
         </div>
         <div>
@@ -143,10 +143,10 @@ export function LeadRow({ lead, onNote }: { lead: Lead; onNote: (l: Lead) => voi
         <div className="min-w-0">
           <h3 className="truncate font-semibold text-foreground">{lead.name}</h3>
           <p className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-            <span className="font-mono text-primary">{lead.phone}</span>
+            <span className="font-mono text-primary">{lead.phone || 'Sem telefone'}</span>
             <span className="flex items-center gap-1">
               <Star className="size-3 fill-yellow-400 text-yellow-400" />
-              {`${lead.rating.toFixed(1)} (${lead.reviews})`}
+              {lead.rating != null ? `${lead.rating.toFixed(1)} (${lead.reviews})` : 'Sem avaliações'}
             </span>
           </p>
         </div>

@@ -7,10 +7,12 @@ export type Lead = {
   phone: string
   whatsapp: boolean
   email: string | null
-  rating: number
+  rating: number | null
   reviews: number
   open: boolean
   closesAt: string
+  weekly_hours?: Record<string, string>
+  hours_text?: string
   presence: WebPresence
   website: string | null
   address: string
