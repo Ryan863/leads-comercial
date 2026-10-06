@@ -44,21 +44,26 @@ def sanitize_slug(text: str) -> str:
 
 def extract_niche_and_city(query: str) -> Tuple[str, str]:
     """
-    Extrai o nicho/área e a cidade/região a partir da query de busca.
-    Exemplo: 'Padarias em Centro' -> ('padarias', 'centro')
+    Extrai o nicho/área e a cidade/região a partir da query de busca de forma limpa.
+    Exemplo: 'Estética Automotiva em Ilhéus - BA' -> ('estetica automotiva', 'ilheus')
     """
     if not query:
         return ("leads", "geral")
 
-    parts = re.split(r"\sem\s", query, flags=re.IGNORECASE)
-    if len(parts) > 1:
-        return (parts[0].strip(), parts[1].strip())
+    try:
+        from scraper import parse_location_query
+        niche, city, _ = parse_location_query(query)
+        return (niche or "leads", city or "geral")
+    except Exception:
+        parts = re.split(r"\sem\s", query, flags=re.IGNORECASE)
+        if len(parts) > 1:
+            return (parts[0].strip(), parts[1].strip())
 
-    if "-" in query:
-        sub = query.split("-")
-        return (sub[0].strip(), "-".join(sub[1:]).strip())
+        if "-" in query:
+            sub = query.split("-")
+            return (sub[0].strip(), "-".join(sub[1:]).strip())
 
-    return (query.strip(), "geral")
+        return (query.strip(), "geral")
 
 def generate_export_filename(query: str = "", extension: str = "csv") -> str:
     """

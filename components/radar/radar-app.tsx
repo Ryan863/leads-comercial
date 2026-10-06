@@ -108,6 +108,11 @@ export function RadarApp() {
               setLeads((prev) => {
                 // Evita duplicatas por id
                 if (prev.some((item) => item.id === payload.data.id)) return prev
+                // Evita duplicatas por telefone
+                const newDigits = payload.data.phone?.replace(/\D/g, '')
+                if (newDigits && newDigits.length >= 8 && prev.some((item) => item.phone?.replace(/\D/g, '') === newDigits)) {
+                  return prev
+                }
                 return [...prev, payload.data]
               })
               if (payload.current && payload.total) {

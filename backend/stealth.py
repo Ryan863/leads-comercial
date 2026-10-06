@@ -60,10 +60,24 @@ def get_random_user_agent() -> str:
 def get_random_viewport() -> dict:
     return random.choice(VIEWPORTS)
 
+VALID_DDDS = {
+    "11", "12", "13", "14", "15", "16", "17", "18", "19",
+    "21", "22", "24", "27", "28",
+    "31", "32", "33", "34", "35", "37", "38",
+    "41", "42", "43", "44", "45", "46", "47", "48", "49",
+    "51", "53", "54", "55",
+    "61", "62", "63", "64", "65", "66", "67", "68", "69",
+    "71", "73", "74", "75", "77", "79",
+    "81", "82", "83", "84", "85", "86", "87", "88", "89",
+    "91", "92", "93", "94", "95", "96", "97", "98", "99"
+}
+
 def clean_phone(raw: str) -> Tuple[str, bool]:
     """
     Normaliza o número de telefone e determina se possui WhatsApp (celular brasileiro).
     Retorna (telefone_formatado, is_whatsapp).
+    Valida estritamente se o número é um telefone brasileiro real (DDD válido e 10/11 dígitos),
+    evitando números corrompidos, CEPs, CNPJs ou fragmentos.
     """
     if not raw:
         return ("", False)
@@ -71,26 +85,34 @@ def clean_phone(raw: str) -> Tuple[str, bool]:
     digits = re.sub(r"\D", "", raw)
     
     # Remove código 55 do início se presente
-    if digits.startswith("55") and len(digits) >= 12:
+    if digits.startswith("55") and len(digits) in (12, 13):
         digits = digits[2:]
         
-    is_mobile = False
-    
-    # Formatação para números brasileiros (DDD + 9 dígitos celular ou 8 fixo)
+    # Remove zero inicial de discagem interurbana (ex: 071 9...)
+    if digits.startswith("0") and len(digits) in (11, 12):
+        digits = digits[1:]
+        
+    if len(digits) not in (10, 11):
+        return ("", False)
+        
+    ddd = digits[:2]
+    if ddd not in VALID_DDDS:
+        return ("", False)
+        
     if len(digits) == 11:
-        ddd = digits[:2]
-        first_digit = digits[2]
-        is_mobile = (first_digit == "9")
+        # Celular no Brasil sempre começa com 9 após o DDD
+        first_subscriber_digit = digits[2]
+        if first_subscriber_digit != "9":
+            return ("", False)
+        is_mobile = True
         formatted = f"({ddd}) {digits[2:7]}-{digits[7:]}"
-    elif len(digits) == 10:
-        ddd = digits[:2]
-        formatted = f"({ddd}) {digits[2:6]}-{digits[6:]}"
+    else:  # len(digits) == 10
+        # Fixo no Brasil normalmente começa com 2, 3, 4 ou 5
+        first_subscriber_digit = digits[2]
+        if first_subscriber_digit not in ("2", "3", "4", "5"):
+            return ("", False)
         is_mobile = False
-    elif len(digits) >= 8:
-        formatted = raw.strip()
-        is_mobile = "9" in digits[:4]
-    else:
-        formatted = raw.strip()
+        formatted = f"({ddd}) {digits[2:6]}-{digits[6:]}"
         
     return (formatted, is_mobile)
 

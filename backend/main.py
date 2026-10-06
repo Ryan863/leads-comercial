@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import uuid
 
@@ -57,6 +58,8 @@ class SearchJob:
         self.error: Optional[str] = None
         self.queue: asyncio.Queue = asyncio.Queue()
         self.emitted_ids = set()
+        self.emitted_names = set()
+        self.emitted_phones = set()
 
 
 jobs: Dict[str, SearchJob] = {}
@@ -115,7 +118,7 @@ async def health_check():
 
 
 async def _run_scraper_task(job: SearchJob):
-    """Executa a raspagem em segundo plano e despacha eventos no canal SSE."""
+    """Executa a raspagem em segundo plano e despacha eventos no canal SSE com desduplicação estrita."""
     job.status = "processing"
     logger.info(f"[JOB {job.job_id}] INICIADO | Query: '{job.query}' | Desejado: {job.quantity} | Fonte: '{job.source}'")
 
@@ -126,18 +129,33 @@ async def _run_scraper_task(job: SearchJob):
             source=job.source
         ):
             lead_id = lead.get("id") or str(uuid.uuid4())
-            if lead_id not in job.emitted_ids:
-                job.emitted_ids.add(lead_id)
-                job.leads.append(lead)
+            lead_name = (lead.get("name") or "").strip().lower()
+            lead_phone = re.sub(r"\D", "", lead.get("phone") or "")
 
-                event = {
-                    "type": "lead",
-                    "data": lead,
-                    "current": len(job.leads),
-                    "total": job.quantity
-                }
-                await job.queue.put(event)
-                logger.info(f"[JOB {job.job_id}] Lead capturado [{len(job.leads)}/{job.quantity}]: '{lead.get('name')}'")
+            if lead_id in job.emitted_ids:
+                continue
+            if lead_name and lead_name in job.emitted_names:
+                continue
+            if lead_phone and lead_phone in job.emitted_phones:
+                logger.info(f"[JOB {job.job_id}] Telefone duplicado bloqueado na API: {lead.get('phone')} ('{lead.get('name')}')")
+                continue
+
+            job.emitted_ids.add(lead_id)
+            if lead_name:
+                job.emitted_names.add(lead_name)
+            if lead_phone:
+                job.emitted_phones.add(lead_phone)
+
+            job.leads.append(lead)
+
+            event = {
+                "type": "lead",
+                "data": lead,
+                "current": len(job.leads),
+                "total": job.quantity
+            }
+            await job.queue.put(event)
+            logger.info(f"[JOB {job.job_id}] Lead capturado [{len(job.leads)}/{job.quantity}]: '{lead.get('name')}' | Tel: {lead.get('phone')}")
 
         job.status = "completed"
         done_event = {

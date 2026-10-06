@@ -45,10 +45,10 @@ const NICHES: NichePreset[] = [
     suffixes: ['Imóveis', 'Imobiliária', 'Negócios Imobiliários', 'Corretora'],
   },
   {
-    match: /mec[aâ]n|auto|oficina/i,
-    category: ['Oficina Mecânica', 'Auto Center', 'Centro Automotivo'],
-    prefixes: ['Turbo', 'Pit Stop', 'Motor Forte', 'Garage', 'Rota', 'Precision', 'Box 10', 'Torque', 'Roda Viva', 'Speed'],
-    suffixes: ['Auto Center', 'Mecânica', 'Car Service', 'Oficina', 'Centro Automotivo'],
+    match: /mec[aâ]n|auto|oficina|est[eé]tica|lava/i,
+    category: ['Estética Automotiva', 'Auto Spa & Detailing', 'Centro Automotivo', 'Oficina Mecânica'],
+    prefixes: ['Studio Auto', 'Prime Detail', 'Elite Garage', 'Concept Car', 'Precision', 'Turbo', 'Rota', 'Speed', 'Diamond', 'Maxx Detail'],
+    suffixes: ['Estética Automotiva', 'Car Detail', 'Auto Spa', 'Centro Automotivo', 'Detailing'],
   },
 ]
 
@@ -60,10 +60,29 @@ const GENERIC: NichePreset = {
 }
 
 const DDD: Record<string, string> = {
-  sc: '49', sp: '11', floripa: '48', 'florianópolis': '48', curitiba: '41', pr: '41', rj: '21', bh: '31', mg: '31', rs: '51', 'porto alegre': '51',
+  // Bahia
+  'salvador': '71', 'lauro de freitas': '71', 'camaçari': '71', 'camacari': '71', 'simões filho': '71', 'simoes filho': '71',
+  'feira de santana': '75', 'alagoinhas': '75', 'santo antônio de jesus': '75',
+  'ilhéus': '73', 'ilheus': '73', 'itabuna': '73', 'porto seguro': '73', 'jequié': '73', 'jequie': '73', 'canavieiras': '73',
+  'vitória da conquista': '77', 'vitoria da conquista': '77', 'barreiras': '77',
+  'juazeiro': '74', 'jacobina': '74',
+  'ba': '71', 'bahia': '71',
+  // Santa Catarina
+  'sc': '49', 'videira': '49', 'caçador': '49', 'cacador': '49', 'chapecó': '49', 'chapeco': '49',
+  'florianópolis': '48', 'florianopolis': '48', 'floripa': '48', 'joinville': '47', 'blumenau': '47',
+  // São Paulo
+  'sp': '11', 'são paulo': '11', 'sao paulo': '11', 'campinas': '19', 'santos': '13',
+  // Rio de Janeiro
+  'rj': '21', 'rio de janeiro': '21',
+  // Paraná
+  'pr': '41', 'curitiba': '41', 'londrina': '43', 'maringá': '44',
+  // Rio Grande do Sul
+  'rs': '51', 'porto alegre': '51', 'caxias do sul': '54',
+  // Minas Gerais
+  'mg': '31', 'bh': '31', 'belo horizonte': '31', 'uberlândia': '34',
 }
 
-const STREETS = ['Rua XV de Novembro', 'Av. Brasil', 'Rua das Flores', 'Av. Santos Dumont', 'Rua Sete de Setembro', 'Rua Marechal Deodoro', 'Av. Getúlio Vargas']
+const STREETS = ['Rua XV de Novembro', 'Av. Brasil', 'Rua das Flores', 'Av. Santos Dumont', 'Rua Sete de Setembro', 'Rua Marechal Deodoro', 'Av. Getúlio Vargas', 'Av. Central']
 
 function hash(input: string) {
   let h = 2166136261
@@ -92,7 +111,9 @@ function slug(text: string) {
 
 function parseCity(query: string) {
   const parts = query.split(/\sem\s/i)
-  return (parts[1] ?? 'Sua Cidade').trim()
+  let raw = (parts[1] ?? (query.includes('-') ? query.split('-')[1] : 'Sua Cidade')).trim()
+  raw = raw.replace(/[-,\s]+\b(ba|bahia|sc|sp|rj|pr|rs|mg|ce|pe|df)\b.*$/i, '').trim()
+  return raw || 'Sua Cidade'
 }
 
 function pickDDD(city: string) {
@@ -108,24 +129,35 @@ export function generateLeads(query: string, count: number): Lead[] {
   const city = parseCity(query)
   const ddd = pickDDD(city)
   const rand = rng(hash(query.toLowerCase() + count))
-  const used = new Set<string>()
+  const usedNames = new Set<string>()
+  const usedPhones = new Set<string>()
   const leads: Lead[] = []
 
   for (let i = 0; i < count; i++) {
     let name = ''
-    for (let tries = 0; tries < 20; tries++) {
+    for (let tries = 0; tries < 25; tries++) {
       const p = preset.prefixes[Math.floor(rand() * preset.prefixes.length)]
       const s = preset.suffixes[Math.floor(rand() * preset.suffixes.length)]
       name = `${p} ${s}`
-      if (!used.has(name)) break
+      if (!usedNames.has(name)) break
     }
-    used.add(name)
+    usedNames.add(name)
 
     const roll = rand()
     const presence: WebPresence = roll < 0.4 ? 'none' : roll < 0.75 ? 'social' : 'site'
     const handle = slug(name)
-    const phone = `(${ddd}) 9${Math.floor(1000 + rand() * 8999)}-${Math.floor(1000 + rand() * 8999)}`
-    const closeHour = 18 + Math.floor(rand() * 6)
+
+    // Desduplicação estrita de telefone
+    let phone = ''
+    for (let tries = 0; tries < 25; tries++) {
+      const p1 = Math.floor(8100 + rand() * 1890)
+      const p2 = Math.floor(1000 + rand() * 8990)
+      phone = `(${ddd}) 9${p1}-${p2}`
+      if (!usedPhones.has(phone)) break
+    }
+    usedPhones.add(phone)
+
+    const closeHour = 18 + Math.floor(rand() * 4)
 
     leads.push({
       id: `${handle}-${i}`,
@@ -134,8 +166,8 @@ export function generateLeads(query: string, count: number): Lead[] {
       phone,
       whatsapp: rand() > 0.12,
       email: presence === 'none' && rand() > 0.5 ? null : `contato@${handle.slice(0, 18)}.com.br`,
-      rating: Math.round((3.9 + rand() * 1.1) * 10) / 10,
-      reviews: Math.floor(20 + rand() * 600),
+      rating: Math.round((4.2 + rand() * 0.8) * 10) / 10,
+      reviews: Math.floor(20 + rand() * 400),
       open: rand() > 0.25,
       closesAt: `${closeHour}:${rand() > 0.5 ? '30' : '00'}`,
       presence,
