@@ -1,3 +1,5 @@
+import { generatePitch } from './pitch-generator'
+
 export type WebPresence = 'none' | 'social' | 'site'
 
 export type Lead = {
@@ -184,13 +186,12 @@ export function generateLeads(query: string, count: number): Lead[] {
   return leads
 }
 
-import { generatePitch } from './pitch-generator'
-
 export function whatsappLink(lead: Lead, customMessage?: string) {
   const digits = lead.phone.replace(/\D/g, '')
+  const cleanDigits = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits
   const message = customMessage ?? generatePitch(lead)
   const text = encodeURIComponent(message)
-  return `https://wa.me/55${digits}?text=${text}`
+  return `https://wa.me/55${cleanDigits}?text=${text}`
 }
 
 export function mapsLink(lead: Lead) {

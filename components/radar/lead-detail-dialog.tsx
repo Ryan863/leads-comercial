@@ -140,9 +140,10 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
     }
   }
 
-  const phoneDigits = lead?.phone?.replace(/\D/g, '') || ''
-  const waUrl = lead?.whatsapp && phoneDigits
-    ? `https://wa.me/55${phoneDigits}?text=${encodeURIComponent(message)}`
+  const rawDigits = lead?.phone?.replace(/\D/g, '') || ''
+  const cleanDigits = rawDigits.startsWith('55') && rawDigits.length >= 12 ? rawDigits.slice(2) : rawDigits
+  const waUrl = lead?.whatsapp && cleanDigits
+    ? `https://wa.me/55${cleanDigits}?text=${encodeURIComponent(message)}`
     : null
 
   const storedSettings = typeof window !== 'undefined' ? getStoredPitchSettings() : null

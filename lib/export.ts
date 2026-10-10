@@ -91,12 +91,17 @@ export function exportCsv(leads: Lead[], query?: string) {
 }
 
 export function exportExcel(leads: Lead[], query?: string) {
-  const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  const head = `<tr>${HEADERS.map((h) => `<th>${h}</th>`).join('')}</tr>`
+  const esc = (v: string) =>
+    v
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br/>')
+  const head = `<tr>${HEADERS.map((h) => `<th style="background:#2563eb;color:#fff;font-weight:bold;padding:6px;">${h}</th>`).join('')}</tr>`
   const body = toRows(leads)
-    .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)
+    .map((r) => `<tr>${r.map((c) => `<td style="vertical-align:top;padding:6px;border:1px solid #ddd;">${esc(c)}</td>`).join('')}</tr>`)
     .join('')
-  const html = `<html><head><meta charset="utf-8"></head><body><table>${head}${body}</table></body></html>`
+  const html = `<html><head><meta charset="utf-8"></head><body><table border="1" style="font-family:Arial,sans-serif;font-size:12px;border-collapse:collapse;">${head}${body}</table></body></html>`
   const filename = buildExportFilename(query, 'xls')
   download(html, filename, 'application/vnd.ms-excel')
 }

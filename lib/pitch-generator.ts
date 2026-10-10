@@ -58,7 +58,9 @@ export function isLeadInSameCity(address: string, senderCity = 'Videira'): boole
     .toLowerCase()
     .trim()
 
-  return cleanAddr.includes(cleanCity)
+  if (!cleanCity) return false
+  const regex = new RegExp(`(^|[^a-z0-9])${cleanCity}([^a-z0-9]|$)`, 'i')
+  return regex.test(cleanAddr)
 }
 
 /**
