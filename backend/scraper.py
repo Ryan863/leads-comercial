@@ -158,7 +158,7 @@ def is_location_match(address: str, target_city: str, target_state: Optional[str
                     return False
         return True
 
-    # 2. Se a cidade alvo não está no endereço, busca padrão de cidade diferente (ex: "Itabuna - BA", "Salvador, BA")
+    # 2. Se a cidade alvo não está explícita no endereço, verifica se há OUTRA cidade/estado indicada
     city_uf_match = re.search(r"[-,\s]\s*([a-z\s]+?)\s*[,-]\s*([a-z]{2})\b", norm_addr)
     if city_uf_match:
         found_city = city_uf_match.group(1).strip()
@@ -168,7 +168,7 @@ def is_location_match(address: str, target_city: str, target_state: Optional[str
         if target_state and found_uf != target_state.upper():
             return False
 
-    return False
+    return True
 
 
 class LeadScraper:
@@ -225,8 +225,8 @@ class LeadScraper:
                 gmaps_error = True
                 logger.warning(f"[RADAR-SCRAPER] [FALHA GMAPS] Erro no motor Google Maps: {type(e).__name__}: {e}. Acionando fallback se necessário.")
 
-        # 2. Motor de Fallback Resiliente (acionado apenas se a busca principal falhar criticamente sem retornar nenhum lead)
-        if (source == "osm" or (gmaps_error and leads_found == 0)) and leads_found < max_results:
+        # 2. Motor de Fallback Resiliente (acionado se o GMaps não retornar leads suficientes ou se solicitado)
+        if (source == "osm" or leads_found < max_results) and leads_found < max_results:
             remaining = max_results - leads_found
             logger.info(f"[RADAR-SCRAPER] Acionando motor de fallback para coletar até {remaining} leads...")
             try:

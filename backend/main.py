@@ -9,6 +9,16 @@ import uuid
 # Garante ProactorEventLoop no Windows para suporte ao Playwright (subprocess_exec)
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    try:
+        import uvicorn.loops.asyncio
+        uvicorn.loops.asyncio.asyncio_loop_factory = lambda use_subprocess=False: asyncio.ProactorEventLoop
+    except Exception:
+        pass
+    try:
+        import uvicorn.loops.auto
+        uvicorn.loops.auto.auto_loop_factory = lambda use_subprocess=False: asyncio.ProactorEventLoop
+    except Exception:
+        pass
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, Request
@@ -100,6 +110,8 @@ async def log_requests(request: Request, call_next):
 
 
 @app.get("/api/health")
+@app.get("/api/backend/health")
+@app.get("/health")
 async def health_check():
     """Endpoint de checagem de integridade e diagnósticos."""
     payload = {
@@ -181,6 +193,7 @@ async def _run_scraper_task(job: SearchJob):
 
 
 @app.post("/api/search")
+@app.post("/api/backend/search")
 async def start_search(req: SearchRequest, background_tasks: BackgroundTasks, request: Request):
     """Inicia uma nova tarefa de varredura assíncrona."""
     client_ip = request.client.host if request.client else "unknown"
@@ -204,8 +217,8 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks, re
         "query": job.query,
         "quantity": job.quantity,
         "source": job.source,
-        "stream_url": f"/api/search/{job_id}/stream",
-        "status_url": f"/api/search/{job_id}/status"
+        "stream_url": f"/api/backend/search/{job_id}/stream",
+        "status_url": f"/api/backend/search/{job_id}/status"
     }
 
     logger.info(f"[PAYLOAD SAÍDA /api/search] Job Criado: {job_id} | Status: processing")
@@ -213,6 +226,7 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks, re
 
 
 @app.get("/api/search/{job_id}/status")
+@app.get("/api/backend/search/{job_id}/status")
 async def get_search_status(job_id: str):
     """Consulta o status síncrono e leads acumulados de uma varredura."""
     if job_id not in jobs:
@@ -232,6 +246,7 @@ async def get_search_status(job_id: str):
 
 
 @app.get("/api/search/{job_id}/stream")
+@app.get("/api/backend/search/{job_id}/stream")
 async def stream_search_results(job_id: str, request: Request):
     """Transmite os leads em tempo real via Server-Sent Events (SSE)."""
     if job_id not in jobs:
@@ -242,6 +257,8 @@ async def stream_search_results(job_id: str, request: Request):
     logger.info(f"[STREAM SSE INICIADO] Conexão aberta para o Job: {job_id}")
 
     async def event_generator():
+        # Flush inicial imediato para desarmar buffering de proxy/navegador
+        yield ": connected\n\n"
         sent_lead_ids = set()
 
         # 1. Envia leads que já foram processados antes da conexão conectar
@@ -282,9 +299,20 @@ async def stream_search_results(job_id: str, request: Request):
                 logger.info(f"[STREAM SSE] Cliente desconectou voluntariamente da conexão do Job {job_id}")
                 break
 
+            # Se o job completou e a fila está vazia, encerra
+            if job.status in ("completed", "error") and job.queue.empty():
+                done_data = json.dumps({
+                    "type": "done" if job.status == "completed" else "error",
+                    "current": len(job.leads),
+                    "total": job.quantity,
+                    "message": job.error if job.status == "error" else "Varredura concluída."
+                })
+                yield f"data: {done_data}\n\n"
+                break
+
             try:
-                # Heartbeat de 15 segundos para manter a conexão ativa contra timeouts de proxies/browsers
-                event = await asyncio.wait_for(job.queue.get(), timeout=15.0)
+                # Heartbeat de 5 segundos para manter a conexão ativa contra timeouts de proxies/browsers
+                event = await asyncio.wait_for(job.queue.get(), timeout=5.0)
 
                 # Evita duplicar leads já enviados no handshake inicial
                 if event.get("type") == "lead":
@@ -302,7 +330,7 @@ async def stream_search_results(job_id: str, request: Request):
                     break
 
             except asyncio.TimeoutError:
-                # Ping SSE keep-alive
+                # Ping SSE keep-alive a cada 5 segundos
                 yield f": ping\n\n"
             except asyncio.CancelledError:
                 logger.info(f"[STREAM SSE] Conexão cancelada para Job {job_id}")
@@ -312,15 +340,17 @@ async def stream_search_results(job_id: str, request: Request):
         event_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "Content-Encoding": "identity",
             "Access-Control-Allow-Origin": "*",
         }
     )
 
 
 @app.get("/api/leads/export")
+@app.get("/api/backend/leads/export")
 async def export_leads(
     job_id: Optional[str] = Query(None, description="ID do job para exportar"),
     format: str = Query("csv", pattern="^(csv|excel)$"),
@@ -370,4 +400,4 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", "8000"))
     logger.info(f"[*] Iniciando servidor local na porta {port} ({host})...")
-    uvicorn.run("main:app", host=host, port=port, reload=True)
+    uvicorn.run("main:app", host=host, port=port, reload=False, loop="asyncio")

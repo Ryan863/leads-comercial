@@ -32,6 +32,7 @@ function Actions({ lead, onNote, compact = false }: { lead: Lead; onNote: (l: Le
           href={whatsappLink(lead)}
           target="_blank"
           rel="noopener noreferrer"
+          title="Abrir WhatsApp com a mensagem personalizada pronta"
           className={`btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-success text-sm font-semibold text-background shadow-sm transition hover:brightness-110 ${
             compact ? 'px-3' : 'flex-1'
           }`}
@@ -61,8 +62,9 @@ function Actions({ lead, onNote, compact = false }: { lead: Lead; onNote: (l: Le
       <button
         type="button"
         onClick={() => onNote(lead)}
-        aria-label={`Ver detalhes de ${lead.name}`}
-        className="btn-press inline-flex size-10 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent hover:text-foreground"
+        title="Ver mensagem adaptada, IA e detalhes"
+        aria-label={`Ver mensagem adaptada e detalhes de ${lead.name}`}
+        className="btn-press inline-flex size-10 items-center justify-center rounded-lg border border-primary/30 bg-primary/5 text-primary transition hover:bg-primary/15 hover:text-primary"
       >
         <MessageSquareText className="size-4" aria-hidden="true" />
       </button>

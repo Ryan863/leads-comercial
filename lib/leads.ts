@@ -184,11 +184,12 @@ export function generateLeads(query: string, count: number): Lead[] {
   return leads
 }
 
-export function whatsappLink(lead: Lead) {
+import { generatePitch } from './pitch-generator'
+
+export function whatsappLink(lead: Lead, customMessage?: string) {
   const digits = lead.phone.replace(/\D/g, '')
-  const text = encodeURIComponent(
-    `Olá, tudo bem? Encontrei a ${lead.name} no Google Maps e gostaria de apresentar uma proposta rápida para vocês.`,
-  )
+  const message = customMessage ?? generatePitch(lead)
+  const text = encodeURIComponent(message)
   return `https://wa.me/55${digits}?text=${text}`
 }
 

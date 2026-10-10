@@ -1,6 +1,13 @@
 import { Radar, SearchX } from 'lucide-react'
 
 export function ScanningState({ query, progress }: { query: string; progress: number }) {
+  const getStatusText = (pct: number) => {
+    if (pct < 20) return 'Inicializando motor e conectando ao mapa...'
+    if (pct < 45) return 'Mapeando estabelecimentos e endereços...'
+    if (pct < 75) return 'Identificando telefones e presença web...'
+    return 'Compilando leads e finalizando varredura...'
+  }
+
   return (
     <div className="flex flex-col items-center justify-center rounded-2xl border border-border bg-card/50 px-6 py-16 text-center" role="status">
       <div className="relative flex size-40 items-center justify-center rounded-full border border-primary/30">
@@ -12,12 +19,12 @@ export function ScanningState({ query, progress }: { query: string; progress: nu
         <span className="absolute right-12 top-5 size-2 animate-ping-slow rounded-full bg-social [animation-delay:1.2s]" />
         <span className="size-3 rounded-full bg-primary glow-primary" />
       </div>
-      <p className="mt-8 font-semibold">Varrendo o Google Maps...</p>
+      <p className="mt-8 font-semibold">{getStatusText(progress)}</p>
       <p className="mt-1 text-sm text-muted-foreground">{`Buscando "${query}"`}</p>
       <div className="mt-5 h-1.5 w-64 overflow-hidden rounded-full bg-muted">
-        <div className="h-full rounded-full bg-primary transition-all duration-200" style={{ width: `${progress}%` }} />
+        <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${Math.max(5, progress)}%` }} />
       </div>
-      <p className="mt-2 font-mono text-xs text-muted-foreground">{`${progress}%`}</p>
+      <p className="mt-2 font-mono text-xs text-muted-foreground">{`${Math.round(progress)}%`}</p>
     </div>
   )
 }

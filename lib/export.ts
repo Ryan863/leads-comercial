@@ -1,8 +1,22 @@
 import type { Lead } from './leads'
+import { generatePitch } from './pitch-generator'
 
 const PRESENCE_LABEL = { none: 'Sem site', social: 'Rede social', site: 'Site próprio' } as const
 
-const HEADERS = ['Nome', 'Categoria', 'Telefone', 'WhatsApp', 'E-mail', 'Avaliação', 'Avaliações', 'Horários da Semana', 'Presença', 'Website', 'Endereço']
+const HEADERS = [
+  'Nome',
+  'Categoria',
+  'Telefone',
+  'WhatsApp',
+  'E-mail',
+  'Avaliação',
+  'Avaliações',
+  'Horários da Semana',
+  'Presença',
+  'Website',
+  'Endereço',
+  'Mensagem WhatsApp (Abordagem Pronta)',
+]
 
 function toRows(leads: Lead[]) {
   return leads.map((l) => [
@@ -17,6 +31,7 @@ function toRows(leads: Lead[]) {
     PRESENCE_LABEL[l.presence],
     l.website ?? '',
     l.address,
+    generatePitch(l),
   ])
 }
 

@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, Cpu, HelpCircle, Loader2, Radio, Zap } from 'lucide-react'
+import { CheckCircle2, Cpu, HelpCircle, Loader2, Radio, Sparkles, Zap } from 'lucide-react'
 import { generateLeads, type Lead } from '@/lib/leads'
+import { getStoredPitchSettings, type PitchSettings, DEFAULT_PITCH_SETTINGS } from '@/lib/pitch-generator'
 import { SearchPanel } from './search-panel'
 import { StatsCards } from './stats-cards'
 import { FiltersBar, type PresenceFilter, type ViewMode } from './filters-bar'
@@ -10,6 +11,7 @@ import { LeadCard, LeadRow } from './lead-card'
 import { ExportActions } from './export-actions'
 import { IdleState, NoResults, ScanningState } from './radar-states'
 import { LeadDetailDialog } from './lead-detail-dialog'
+import { PitchConfigDialog } from './pitch-config-dialog'
 
 const DEMO_QUERY = 'Pizzarias em Videira - SC'
 
@@ -27,9 +29,31 @@ export function RadarApp() {
   const [selected, setSelected] = useState<Lead | null>(null)
   const [isBackendOnline, setIsBackendOnline] = useState<boolean | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
-  
+  const [configOpen, setConfigOpen] = useState(false)
+  const [pitchSettings, setPitchSettings] = useState<PitchSettings>(DEFAULT_PITCH_SETTINGS)
+
+  useEffect(() => {
+    setPitchSettings(getStoredPitchSettings())
+  }, [])
+
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollingTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
+
+  function stopAllScans() {
+    if (timer.current) {
+      clearInterval(timer.current)
+      timer.current = null
+    }
+    if (pollingTimer.current) {
+      clearInterval(pollingTimer.current)
+      pollingTimer.current = null
+    }
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+    }
+  }
 
   // Verifica status do backend Python/FastAPI ao carregar
   useEffect(() => {
@@ -51,8 +75,7 @@ export function RadarApp() {
   // Limpa conexões pendentes no unmount
   useEffect(() => {
     return () => {
-      if (timer.current) clearInterval(timer.current)
-      if (eventSourceRef.current) eventSourceRef.current.close()
+      stopAllScans()
     }
   }, [])
 
@@ -60,17 +83,13 @@ export function RadarApp() {
     const term = q.trim()
     if (!term) return
 
-    if (timer.current) clearInterval(timer.current)
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close()
-      eventSourceRef.current = null
-    }
+    stopAllScans()
 
     setFilter('all')
     setSearch('')
     setScannedQuery(term)
     setScanning(true)
-    setProgress(5)
+    setProgress(10)
     setLeads([])
 
     // Modo demonstração instantâneo forçado pelo usuário
@@ -81,8 +100,16 @@ export function RadarApp() {
       return
     }
 
-    // Se o backend estiver online, inicia a raspagem real via streaming SSE
+    // Se o backend estiver online, inicia a raspagem real via streaming SSE + polling sincronizado
     if (isBackendOnline) {
+      // Animação de progresso suave durante inicialização do motor Playwright
+      timer.current = setInterval(() => {
+        setProgress((prev) => {
+          if (prev < 28) return prev + 2
+          return prev
+        })
+      }, 500)
+
       try {
         const res = await fetch('/api/backend/search', {
           method: 'POST',
@@ -95,55 +122,108 @@ export function RadarApp() {
         }
 
         const data = await res.json()
-        setActiveJobId(data.id)
+        const jobId = data.id
+        setActiveJobId(jobId)
 
-        // Conecta ao fluxo de Server-Sent Events (SSE)
-        const eventSource = new EventSource(`/api/backend/search/${data.id}/stream`)
-        eventSourceRef.current = eventSource
+        // Função auxiliar para incorporar leads sem duplicatas
+        const mergeLeads = (newLeads: Lead[]) => {
+          setLeads((prev) => {
+            const combined = [...prev]
+            for (const item of newLeads) {
+              const alreadyHasId = combined.some((c) => c.id === item.id)
+              const phoneDigits = item.phone?.replace(/\D/g, '')
+              const alreadyHasPhone = phoneDigits && phoneDigits.length >= 8 && combined.some((c) => c.phone?.replace(/\D/g, '') === phoneDigits)
+              if (!alreadyHasId && !alreadyHasPhone) {
+                combined.push(item)
+              }
+            }
+            return combined
+          })
+        }
 
-        eventSource.onmessage = (e) => {
-          try {
-            const payload = JSON.parse(e.data)
-            if (payload.type === 'lead') {
-              setLeads((prev) => {
-                // Evita duplicatas por id
-                if (prev.some((item) => item.id === payload.data.id)) return prev
-                // Evita duplicatas por telefone
-                const newDigits = payload.data.phone?.replace(/\D/g, '')
-                if (newDigits && newDigits.length >= 8 && prev.some((item) => item.phone?.replace(/\D/g, '') === newDigits)) {
-                  return prev
+        // 1. Conexão Server-Sent Events (SSE) em tempo real
+        try {
+          const eventSource = new EventSource(`/api/backend/search/${jobId}/stream`)
+          eventSourceRef.current = eventSource
+
+          eventSource.onmessage = (e) => {
+            try {
+              const payload = JSON.parse(e.data)
+              if (payload.type === 'lead' && payload.data) {
+                mergeLeads([payload.data])
+                if (payload.current && payload.total) {
+                  const pct = Math.max(30, Math.min(95, Math.round((payload.current / payload.total) * 100)))
+                  setProgress(pct)
                 }
-                return [...prev, payload.data]
-              })
-              if (payload.current && payload.total) {
-                const pct = Math.min(95, Math.round((payload.current / payload.total) * 100))
+              } else if (payload.type === 'done') {
+                stopAllScans()
+                setProgress(100)
+                setScanning(false)
+              } else if (payload.type === 'error') {
+                console.warn('Alerta do scraper:', payload.message)
+              }
+            } catch {
+              // Ignore parse errors (e.g. comments/heartbeats)
+            }
+          }
+
+          eventSource.onerror = () => {
+            // Em caso de instabilidade na conexão SSE, mantém o polling como salvaguarda
+            if (eventSourceRef.current) {
+              eventSourceRef.current.close()
+              eventSourceRef.current = null
+            }
+          }
+        } catch (sseErr) {
+          console.warn('Erro ao abrir EventSource, utilizando polling de redundância.', sseErr)
+        }
+
+        // 2. Polling ativo como redundância garantida (elimina qualquer congelamento em 5%)
+        let pollCount = 0
+        pollingTimer.current = setInterval(async () => {
+          pollCount += 1
+          try {
+            const statusRes = await fetch(`/api/backend/search/${jobId}/status`, { cache: 'no-store' })
+            if (statusRes.ok) {
+              const statusData = await statusRes.json()
+              if (statusData.leads && statusData.leads.length > 0) {
+                mergeLeads(statusData.leads)
+                const count = statusData.leads.length
+                const pct = Math.max(30, Math.min(95, Math.round((count / quantity) * 100)))
                 setProgress(pct)
               }
-            } else if (payload.type === 'done') {
-              setProgress(100)
-              setScanning(false)
-              eventSource.close()
-            } else if (payload.type === 'error') {
-              console.error('Erro retornado pelo scraper:', payload.message)
-              eventSource.close()
-              // Em caso de erro do robô, preenche com os leads já capturados ou fallback
-              setScanning(false)
-            }
-          } catch (err) {
-            console.error('Erro ao ler evento SSE:', err)
-          }
-        }
 
-        eventSource.onerror = () => {
-          // Se cair a conexão do stream, encerra o loading
-          eventSource.close()
-          setScanning(false)
-        }
+              if (statusData.status === 'completed') {
+                stopAllScans()
+                setProgress(100)
+                setScanning(false)
+                return
+              }
+
+              if (statusData.status === 'error') {
+                stopAllScans()
+                setProgress(100)
+                setScanning(false)
+                return
+              }
+            }
+          } catch (pollErr) {
+            console.debug('Polling check falhou momentaneamente:', pollErr)
+          }
+
+          // Timeout de segurança após 50 segundos para nunca travar a tela
+          if (pollCount > 40) {
+            stopAllScans()
+            setProgress(100)
+            setScanning(false)
+          }
+        }, 1200)
 
         return
       } catch (err) {
         console.warn('Backend inacessível, utilizando simulação offline.', err)
         setIsBackendOnline(false)
+        stopAllScans()
       }
     }
 
@@ -218,17 +298,29 @@ export function RadarApp() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setQuery(DEMO_QUERY)
-            runScan(DEMO_QUERY, true)
-          }}
-          className="btn-press hover-lift inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-card/70 px-4 py-2 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:bg-accent"
-        >
-          <Zap className="size-3.5 text-yellow-400" aria-hidden="true" />
-          Carregar Demonstração Instantânea
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setConfigOpen(true)}
+            title="Personalize seu nome, cidade e IA de mensagens"
+            className="btn-press hover-lift inline-flex w-fit items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3.5 py-2 text-xs font-semibold text-primary transition hover:bg-primary/20"
+          >
+            <Sparkles className="size-3.5" aria-hidden="true" />
+            Automação de Mensagens ({pitchSettings.senderName || 'Ryan'} • {pitchSettings.senderCity || 'Videira'})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setQuery(DEMO_QUERY)
+              runScan(DEMO_QUERY, true)
+            }}
+            className="btn-press hover-lift inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-card/70 px-4 py-2 text-xs font-semibold text-foreground transition hover:border-primary/50 hover:bg-accent"
+          >
+            <Zap className="size-3.5 text-yellow-400" aria-hidden="true" />
+            Demonstração Instantânea
+          </button>
+        </div>
       </div>
 
       <SearchPanel
@@ -292,6 +384,11 @@ export function RadarApp() {
       )}
 
       <LeadDetailDialog lead={selected} onClose={() => setSelected(null)} />
+      <PitchConfigDialog
+        open={configOpen}
+        onClose={() => setConfigOpen(false)}
+        onSaved={() => setPitchSettings(getStoredPitchSettings())}
+      />
     </div>
   )
 }
