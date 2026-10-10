@@ -142,7 +142,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
 
   const rawDigits = lead?.phone?.replace(/\D/g, '') || ''
   const cleanDigits = rawDigits.startsWith('55') && rawDigits.length >= 12 ? rawDigits.slice(2) : rawDigits
-  const waUrl = lead?.whatsapp && cleanDigits
+  const waUrl = cleanDigits && cleanDigits.length >= 8
     ? `https://wa.me/55${cleanDigits}?text=${encodeURIComponent(message)}`
     : null
 
@@ -202,7 +202,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                 <div className="rounded-xl border border-border bg-background/50 p-2.5">
                   <span className="text-[11px] font-medium text-muted-foreground">Telefone</span>
-                  <p className="mt-0.5 font-mono text-xs font-semibold text-primary">{lead.phone || 'Sem telefone'}</p>
+                  <p className="mt-0.5 font-mono text-xs font-semibold text-primary">{lead.phone || 'Não informado no Google'}</p>
                 </div>
                 <div className="rounded-xl border border-border bg-background/50 p-2.5">
                   <span className="text-[11px] font-medium text-muted-foreground">Presença Web</span>
@@ -424,7 +424,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                       </a>
                     ) : (
                       <span className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-                        Número sem WhatsApp verificado
+                        Sem telefone cadastrado no Google
                       </span>
                     )}
                   </div>

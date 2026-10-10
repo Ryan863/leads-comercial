@@ -73,7 +73,7 @@ const DDD: Record<string, string> = {
   'sc': '49', 'videira': '49', 'caçador': '49', 'cacador': '49', 'chapecó': '49', 'chapeco': '49',
   'florianópolis': '48', 'florianopolis': '48', 'floripa': '48', 'joinville': '47', 'blumenau': '47',
   // São Paulo
-  'sp': '11', 'são paulo': '11', 'sao paulo': '11', 'campinas': '19', 'santos': '13',
+  'sp': '11', 'são paulo': '11', 'sao paulo': '11', 'moema': '11', 'campinas': '19', 'santos': '13',
   // Rio de Janeiro
   'rj': '21', 'rio de janeiro': '21',
   // Paraná
@@ -166,7 +166,7 @@ export function generateLeads(query: string, count: number): Lead[] {
       name,
       category: preset.category[Math.floor(rand() * preset.category.length)],
       phone,
-      whatsapp: rand() > 0.12,
+      whatsapp: Boolean(phone),
       email: presence === 'none' && rand() > 0.5 ? null : `contato@${handle.slice(0, 18)}.com.br`,
       rating: Math.round((4.2 + rand() * 0.8) * 10) / 10,
       reviews: Math.floor(20 + rand() * 400),

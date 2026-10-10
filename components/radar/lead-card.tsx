@@ -25,9 +25,11 @@ function WebsiteValue({ lead }: { lead: Lead }) {
 }
 
 function Actions({ lead, onNote, compact = false }: { lead: Lead; onNote: (l: Lead) => void; compact?: boolean }) {
+  const hasPhone = Boolean(lead.phone && lead.phone.replace(/\D/g, '').length >= 8)
+
   return (
     <div className="flex items-center gap-2">
-      {lead.whatsapp ? (
+      {hasPhone ? (
         <a
           href={whatsappLink(lead)}
           target="_blank"
@@ -46,7 +48,7 @@ function Actions({ lead, onNote, compact = false }: { lead: Lead; onNote: (l: Le
             compact ? 'px-3' : 'flex-1'
           }`}
         >
-          Sem WhatsApp
+          Sem Telefone
         </span>
       )}
       <a
@@ -104,7 +106,9 @@ export function LeadCard({ lead, onNote }: { lead: Lead; onNote: (l: Lead) => vo
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 text-sm">
         <div>
           <dt className="text-xs text-muted-foreground">Telefone / WhatsApp:</dt>
-          <dd className="mt-0.5 font-mono font-medium text-primary">{lead.phone}</dd>
+          <dd className="mt-0.5 font-mono font-medium text-primary">
+            {lead.phone || <span className="text-xs font-normal italic text-muted-foreground">Não cadastrado no Google</span>}
+          </dd>
         </div>
         <div>
           <dt className="text-xs text-muted-foreground">Avaliações Google:</dt>

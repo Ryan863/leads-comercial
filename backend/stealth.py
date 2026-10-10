@@ -72,12 +72,12 @@ VALID_DDDS = {
     "91", "92", "93", "94", "95", "96", "97", "98", "99"
 }
 
-def clean_phone(raw: str) -> Tuple[str, bool]:
+def clean_phone(raw: str, default_ddd: str = "") -> Tuple[str, bool]:
     """
-    Normaliza o número de telefone e determina se possui WhatsApp (celular brasileiro).
-    Retorna (telefone_formatado, is_whatsapp).
-    Valida estritamente se o número é um telefone brasileiro real (DDD válido e 10/11 dígitos),
+    Limpa e valida números de telefone brasileiros com DDD válido (10 ou 11 dígitos),
     evitando números corrompidos, CEPs, CNPJs ou fragmentos.
+    Se capturado sem DDD (8 ou 9 dígitos), aplica o default_ddd regional.
+    No Brasil comercial/B2B, tanto celulares quanto telefones fixos operam WhatsApp Business.
     """
     if not raw:
         return ("", False)
@@ -88,10 +88,15 @@ def clean_phone(raw: str) -> Tuple[str, bool]:
     if digits.startswith("55") and len(digits) in (12, 13):
         digits = digits[2:]
         
-    # Remove zero inicial de discagem interurbana (ex: 071 9...)
+    # Remove zero inicial de discagem interurbana (ex: 071 9... ou 049 3...)
     if digits.startswith("0") and len(digits) in (11, 12):
         digits = digits[1:]
         
+    # Se capturou número local sem DDD (8 ou 9 dígitos), aplica o DDD regional se fornecido
+    clean_def_ddd = re.sub(r"\D", "", default_ddd or "")
+    if len(digits) in (8, 9) and clean_def_ddd in VALID_DDDS:
+        digits = f"{clean_def_ddd}{digits}"
+
     if len(digits) not in (10, 11):
         return ("", False)
         
@@ -104,17 +109,16 @@ def clean_phone(raw: str) -> Tuple[str, bool]:
         first_subscriber_digit = digits[2]
         if first_subscriber_digit != "9":
             return ("", False)
-        is_mobile = True
         formatted = f"({ddd}) {digits[2:7]}-{digits[7:]}"
     else:  # len(digits) == 10
         # Fixo no Brasil normalmente começa com 2, 3, 4 ou 5
         first_subscriber_digit = digits[2]
         if first_subscriber_digit not in ("2", "3", "4", "5"):
             return ("", False)
-        is_mobile = False
         formatted = f"({ddd}) {digits[2:6]}-{digits[6:]}"
         
-    return (formatted, is_mobile)
+    # Empresas e comércios no Brasil utilizam WhatsApp Business ativamente em números fixos e móveis
+    return (formatted, True)
 
 def classify_web_presence(website: Optional[str]) -> Tuple[str, Optional[str]]:
     """

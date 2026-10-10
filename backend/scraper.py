@@ -171,6 +171,102 @@ def is_location_match(address: str, target_city: str, target_state: Optional[str
     return True
 
 
+REGIONAL_DDD_MAP: Dict[str, str] = {
+    # SC
+    "videira": "49",
+    "cacador": "49",
+    "caçador": "49",
+    "joacaba": "49",
+    "chapeco": "49",
+    "fraiburgo": "49",
+    "lages": "49",
+    "curitibanos": "49",
+    "florianopolis": "48",
+    "floripa": "48",
+    "sao jose": "48",
+    "palhoca": "48",
+    "criciuma": "48",
+    "tubarao": "48",
+    "joinville": "47",
+    "blumenau": "47",
+    "itajai": "47",
+    "balneario camboriu": "47",
+    "brusque": "47",
+    "jaragua do sul": "47",
+    # SP
+    "moema": "11",
+    "sao paulo": "11",
+    "sp": "11",
+    "pinheiros": "11",
+    "itaim": "11",
+    "vilamariana": "11",
+    "vila mariana": "11",
+    "santana": "11",
+    "tatuape": "11",
+    "morumbi": "11",
+    "perdizes": "11",
+    "jardins": "11",
+    "bela vista": "11",
+    "campinas": "19",
+    "santos": "13",
+    "sao jose dos campos": "12",
+    "sjc": "12",
+    "ribeirao preto": "16",
+    "sorocaba": "15",
+    "sao bernardo do campo": "11",
+    "santo andre": "11",
+    "osasco": "11",
+    "guarulhos": "11",
+    "barueri": "11",
+    # RJ
+    "rio de janeiro": "21",
+    "niteroi": "21",
+    # MG
+    "belo horizonte": "31",
+    "bh": "31",
+    "uberlandia": "34",
+    # BA
+    "salvador": "71",
+    "lauro de freitas": "71",
+    "camacari": "71",
+    "feira de santana": "75",
+    "vitoria da conquista": "77",
+    "ilheus": "73",
+    "itabuna": "73",
+    # PR
+    "curitiba": "41",
+    "londrina": "43",
+    "maringa": "44",
+    # RS
+    "porto alegre": "51",
+    "caxias do sul": "54",
+}
+
+DEFAULT_STATE_DDD: Dict[str, str] = {
+    "AC": "68", "AL": "82", "AP": "96", "AM": "92", "BA": "71", "CE": "85",
+    "DF": "61", "ES": "27", "GO": "62", "MA": "98", "MT": "65", "MS": "67",
+    "MG": "31", "PA": "91", "PB": "83", "PR": "41", "PE": "81", "PI": "86",
+    "RJ": "21", "RN": "84", "RS": "51", "RO": "69", "RR": "95", "SC": "49",
+    "SP": "11", "SE": "79", "TO": "63"
+}
+
+def infer_regional_ddd(city: str, state: Optional[str] = None, query: str = "") -> str:
+    """Infere o DDD correto a partir da cidade, query ou UF para enriquecer números locais sem DDD."""
+    norm_city = normalize_text(city or "")
+    if norm_city in REGIONAL_DDD_MAP:
+        return REGIONAL_DDD_MAP[norm_city]
+    
+    norm_query = normalize_text(query or "")
+    for k, v in REGIONAL_DDD_MAP.items():
+        if k in norm_query:
+            return v
+            
+    if state and state.upper() in DEFAULT_STATE_DDD:
+        return DEFAULT_STATE_DDD[state.upper()]
+        
+    return ""
+
+
 class LeadScraper:
     def __init__(self):
         self.browser: Optional[Browser] = None
@@ -412,6 +508,7 @@ class LeadScraper:
                                 pass
 
                             if card_text:
+                                snippet_data["card_text"] = card_text
                                 r_match = re.search(r"(\d+[\.,]\d+)", card_text)
                                 if r_match:
                                     snippet_data["rating"] = float(r_match.group(1).replace(",", "."))
@@ -557,17 +654,63 @@ class LeadScraper:
             except Exception:
                 pass
 
-            # 3. Telefone: Extraído ESTRITAMENTE do botão de ação do próprio estabelecimento
-            # NUNCA executamos busca por regex no div[role="main"] global para evitar números repetidos de outros cards
-            phone_raw = ""
+            # 3. Telefone: Extração robusta priorizando os atributos com dígitos reais
+            phone_candidates: List[str] = []
+
+            # a) data-item-id contendo phone:tel: (Ex: phone:tel:+554935664747)
             try:
-                phone_elem = page.locator('button[data-tooltip*="Copiar número de telefone"], button[data-item-id*="phone"], button[aria-label*="Telefone:"]').first
-                if await phone_elem.is_visible(timeout=600):
-                    phone_raw = await phone_elem.get_attribute("aria-label") or await phone_elem.inner_text(timeout=400)
+                for el in await page.locator('[data-item-id*="phone:tel:"]').all():
+                    item_id = await el.get_attribute("data-item-id") or ""
+                    match_tel = re.search(r"phone:tel:([0-9+]+)", item_id)
+                    if match_tel:
+                        phone_candidates.append(match_tel.group(1))
             except Exception:
                 pass
 
-            phone, is_whatsapp = clean_phone(phone_raw)
+            # b) a[href^="tel:"]
+            try:
+                for el in await page.locator('a[href^="tel:"]').all():
+                    href = await el.get_attribute("href") or ""
+                    phone_candidates.append(re.sub(r"^tel:", "", href))
+            except Exception:
+                pass
+
+            # c) aria-label contendo Telefone:
+            try:
+                for el in await page.locator('[aria-label*="Telefone:"], [aria-label*="telefone:"]').all():
+                    aria = await el.get_attribute("aria-label") or ""
+                    phone_candidates.append(aria)
+            except Exception:
+                pass
+
+            # d) Elementos com tooltip de telefone que contenham dígitos reais no texto ou aria
+            try:
+                for el in await page.locator('button[data-tooltip*="telefone" i], button[data-tooltip*="Telefone"], div[data-item-id*="phone"]').all():
+                    txt = await el.inner_text()
+                    if any(c in txt for c in "0123456789"):
+                        phone_candidates.append(txt)
+                    aria = await el.get_attribute("aria-label") or ""
+                    if any(c in aria for c in "0123456789"):
+                        phone_candidates.append(aria)
+            except Exception:
+                pass
+
+            # e) Snippet do card do feed se contiver número explícito
+            card_snippet_text = snip.get("card_text", "")
+            if card_snippet_text:
+                m_card = re.findall(r"(?:\(?0?[1-9]{2}\)?\s*)?(?:9\s*)?[2-9]\d{3}[-\s]\d{4}", card_snippet_text)
+                for mc in m_card:
+                    phone_candidates.append(mc)
+
+            regional_ddd = infer_regional_ddd(target_city, None, original_query)
+            phone = ""
+            is_whatsapp = False
+            for cand in phone_candidates:
+                formatted_p, is_wpp = clean_phone(cand, default_ddd=regional_ddd)
+                if formatted_p:
+                    phone = formatted_p
+                    is_whatsapp = is_wpp
+                    break
 
             # 4. Website Oficial e Presença Web
             website = None
@@ -776,7 +919,8 @@ class LeadScraper:
                     continue
 
                 phone_raw = tags.get("phone") or tags.get("contact:phone") or tags.get("contact:whatsapp") or ""
-                phone, is_whatsapp = clean_phone(phone_raw)
+                osm_ddd = infer_regional_ddd(city)
+                phone, is_whatsapp = clean_phone(phone_raw, default_ddd=osm_ddd)
 
                 website = tags.get("website") or tags.get("contact:website")
                 presence, website_url = classify_web_presence(website)
