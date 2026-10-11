@@ -637,47 +637,22 @@ class LeadScraper:
                             except Exception:
                                 pass
 
-                            # Clica no card para abrir o painel lateral com sincronização segura
-                            panel_synced = False
+                            # Clica no card para abrir o painel lateral com sincronização adequada
                             try:
                                 await link_el.scroll_into_view_if_needed(timeout=1000)
                                 await link_el.click(timeout=1500)
-
-                                # Tokens significativos do nome para correspondência precisa
-                                name_tokens = [w for w in norm_name.split() if len(w) > 2]
-                                if not name_tokens:
-                                    name_tokens = norm_name.split()[:2]
-
-                                # Sincroniza o painel: aguarda que o título do painel corresponda ao estabelecimento clicado
-                                for _ in range(10):
-                                    panel_title = page.locator("div[role='main'] h1, h1.DUwDvf, div.lMbq3e, h2.bPageTitle").first
-                                    if await panel_title.is_visible(timeout=200):
-                                        t_text = normalize_text(await panel_title.inner_text(timeout=200))
-                                        if any(part in t_text for part in name_tokens):
-                                            panel_synced = True
-                                            break
-                                    await asyncio.sleep(0.12)
-
-                                # Se ainda não sincronizou, tenta um novo clique direto no link
-                                if not panel_synced:
-                                    try:
-                                        await link_el.click(timeout=800)
-                                        await asyncio.sleep(0.25)
-                                        panel_title = page.locator("div[role='main'] h1, h1.DUwDvf, div.lMbq3e, h2.bPageTitle").first
-                                        if await panel_title.is_visible(timeout=250):
-                                            t_text = normalize_text(await panel_title.inner_text(timeout=250))
-                                            if any(part in t_text for part in name_tokens):
-                                                panel_synced = True
-                                    except Exception:
-                                        pass
-
-                                await asyncio.sleep(0.2)
+                                # Aguarda a renderização do painel de detalhes (título, telefone ou endereço)
+                                try:
+                                    await page.wait_for_selector('h1.DUwDvf, [data-item-id*="address"], [data-item-id*="phone"]', timeout=1500)
+                                except Exception:
+                                    pass
+                                await asyncio.sleep(0.4)
                             except Exception as click_err:
                                 logger.debug(f"[GMAPS] Aviso ao abrir detalhes do card {index} ({name}): {click_err}")
 
                             lead_data = await self._extract_place_details(
                                 page, name, query, target_city, snippet_data,
-                                target_country=target_country, panel_synced=panel_synced
+                                target_country=target_country
                             )
                             if not lead_data:
                                 continue
@@ -833,130 +808,119 @@ class LeadScraper:
     ) -> Optional[Dict]:
         """
         Extrai campos ricos do painel do estabelecimento no Google Maps
-        com timeouts estritos e sem capturas fantasmas de outros cards.
+        com timeouts estritos, alta confiabilidade e sem capturas fantasmas de outros cards.
         """
         snip = snippet or {}
         try:
-            # Contexto de busca:
-            # Se o painel estiver sincronizado com o estabelecimento atual, busca
-            # estritamente dentro do container do painel (div[role="main"]).
-            # JAMAIS vasculha a página global nem elementos de outros cards do feed!
-            panel_elem = page.locator('div[role="main"]').first
-            has_panel = panel_synced and (await panel_elem.count() > 0)
-            search_context = panel_elem if has_panel else None
-
             # 1. Categoria
             category = "Comércio e Serviços"
-            if search_context:
-                cat_elem = search_context.locator('button[jsaction*="category"], span.fontBodyMedium, button.DkEaL').first
-                try:
-                    if await cat_elem.is_visible(timeout=400):
-                        txt = await cat_elem.inner_text(timeout=400)
-                        if txt and len(txt) < 50 and not any(c in txt for c in "0123456789"):
-                            category = txt.strip()
-                except Exception:
-                    pass
+            cat_elem = page.locator('button[jsaction*="category"], span.fontBodyMedium, button.DkEaL').first
+            try:
+                if await cat_elem.is_visible(timeout=500):
+                    txt = await cat_elem.inner_text(timeout=500)
+                    if txt and len(txt) < 50 and not any(c in txt for c in "0123456789"):
+                        category = txt.strip()
+            except Exception:
+                pass
 
             # 2. Avaliação e Reviews legítimos
             rating: Optional[float] = snip.get("rating")
             reviews: int = snip.get("reviews", 0)
-            if search_context:
-                try:
-                    rating_elem = search_context.locator('div.F7nice span[aria-hidden="true"], span.ceNzKf[aria-hidden="true"]').first
-                    if await rating_elem.is_visible(timeout=300):
-                        r_txt = await rating_elem.inner_text(timeout=300)
-                        match = re.search(r"(\d+[\.,]\d+)", r_txt)
-                        if match:
-                            rating = float(match.group(1).replace(",", "."))
+            try:
+                rating_elem = page.locator('div.F7nice span[aria-hidden="true"], span.ceNzKf[aria-hidden="true"]').first
+                if await rating_elem.is_visible(timeout=400):
+                    r_txt = await rating_elem.inner_text(timeout=400)
+                    match = re.search(r"(\d+[\.,]\d+)", r_txt)
+                    if match:
+                        rating = float(match.group(1).replace(",", "."))
 
-                    rev_elem = search_context.locator('div.F7nice span[aria-label*="avalia"], span[aria-label*="avaliaç"], span[aria-label*="review"]').first
-                    if await rev_elem.is_visible(timeout=300):
-                        rev_aria = await rev_elem.get_attribute("aria-label") or await rev_elem.inner_text(timeout=300)
-                        match = re.search(r"([\d\.\,]+)", rev_aria)
-                        if match:
-                            clean_num = match.group(1).replace(".", "").replace(",", "")
-                            if clean_num.isdigit():
-                                reviews = int(clean_num)
-                except Exception:
-                    pass
+                rev_elem = page.locator('div.F7nice span[aria-label*="avalia"], span[aria-label*="avaliaç"], span[aria-label*="review"]').first
+                if await rev_elem.is_visible(timeout=400):
+                    rev_aria = await rev_elem.get_attribute("aria-label") or await rev_elem.inner_text(timeout=400)
+                    match = re.search(r"([\d\.\,]+)", rev_aria)
+                    if match:
+                        clean_num = match.group(1).replace(".", "").replace(",", "")
+                        if clean_num.isdigit():
+                            reviews = int(clean_num)
+            except Exception:
+                pass
 
             # 3. Telefone: Extração robusta priorizando os atributos com dígitos reais
             phone_candidates: List[str] = []
 
-            if search_context:
-                # a) data-item-id contendo phone:tel: ou phone: (Ex: phone:tel:+13055986070, phone:tel:+81312345678)
-                try:
-                    for el in await search_context.locator('[data-item-id*="phone:tel:"], [data-item-id^="phone:"], [data-item-id*="phone"]').all():
-                        item_id = await el.get_attribute("data-item-id") or ""
-                        match_tel = re.search(r"phone:(?:tel:)?([0-9+]+)", item_id)
-                        if match_tel:
-                            phone_candidates.append(match_tel.group(1))
-                        aria = await el.get_attribute("aria-label") or ""
-                        if any(c in aria for c in "0123456789"):
-                            phone_candidates.append(aria)
-                        txt = await el.inner_text()
-                        if any(c in txt for c in "0123456789"):
-                            phone_candidates.append(txt)
-                except Exception:
-                    pass
+            # a) data-item-id contendo phone:tel: ou phone:
+            try:
+                for el in await page.locator('[data-item-id*="phone:tel:"], [data-item-id^="phone:"], [data-item-id*="phone"]').all():
+                    item_id = await el.get_attribute("data-item-id") or ""
+                    match_tel = re.search(r"phone:(?:tel:)?([0-9+]+)", item_id)
+                    if match_tel:
+                        phone_candidates.append(match_tel.group(1))
+                    aria = await el.get_attribute("aria-label") or ""
+                    if any(c in aria for c in "0123456789"):
+                        phone_candidates.append(aria)
+                    txt = await el.inner_text()
+                    if any(c in txt for c in "0123456789"):
+                        phone_candidates.append(txt)
+            except Exception:
+                pass
 
-                # b) a[href^="tel:"]
-                try:
-                    for el in await search_context.locator('a[href^="tel:"]').all():
-                        href = await el.get_attribute("href") or ""
-                        phone_candidates.append(re.sub(r"^tel:", "", href))
-                except Exception:
-                    pass
+            # b) a[href^="tel:"]
+            try:
+                for el in await page.locator('a[href^="tel:"]').all():
+                    href = await el.get_attribute("href") or ""
+                    phone_candidates.append(re.sub(r"^tel:", "", href))
+            except Exception:
+                pass
 
-                # c) aria-label multilíngue contendo telefone/phone/call/ligar no painel
-                try:
-                    multi_aria_sel = (
-                        '[aria-label*="telefone" i], [aria-label*="Telefone:"], [aria-label*="phone" i], '
-                        '[aria-label*="Phone:"], [aria-label*="call" i], [aria-label*="ligar" i], '
-                        '[aria-label*="teléfono" i], [aria-label*="téléphone" i], [aria-label*="telefon" i], '
-                        '[aria-label*="telefono" i]'
-                    )
-                    for el in await search_context.locator(multi_aria_sel).all():
-                        aria = await el.get_attribute("aria-label") or ""
-                        if any(c in aria for c in "0123456789"):
-                            phone_candidates.append(aria)
-                except Exception:
-                    pass
+            # c) aria-label multilíngue contendo telefone/phone/call/ligar em múltiplos idiomas
+            try:
+                multi_aria_sel = (
+                    '[aria-label*="telefone" i], [aria-label*="Telefone:"], [aria-label*="phone" i], '
+                    '[aria-label*="Phone:"], [aria-label*="call" i], [aria-label*="ligar" i], '
+                    '[aria-label*="teléfono" i], [aria-label*="téléphone" i], [aria-label*="telefon" i], '
+                    '[aria-label*="telefono" i]'
+                )
+                for el in await page.locator(multi_aria_sel).all():
+                    aria = await el.get_attribute("aria-label") or ""
+                    if any(c in aria for c in "0123456789"):
+                        phone_candidates.append(aria)
+            except Exception:
+                pass
 
-                # d) Botões com tooltip de telefone no painel
-                try:
-                    tooltip_sel = (
-                        'button[data-tooltip*="telefone" i], button[data-tooltip*="phone" i], '
-                        'button[data-tooltip*="copiar" i], button[data-tooltip*="copy" i], '
-                        'button[data-tooltip*="call" i], button[data-tooltip*="ligar" i]'
-                    )
-                    for el in await search_context.locator(tooltip_sel).all():
-                        txt = await el.inner_text()
-                        if any(c in txt for c in "0123456789"):
-                            phone_candidates.append(txt)
-                        aria = await el.get_attribute("aria-label") or ""
-                        if any(c in aria for c in "0123456789"):
-                            phone_candidates.append(aria)
-                except Exception:
-                    pass
+            # d) Elementos com tooltip de telefone/cópia com dígitos reais no texto ou aria
+            try:
+                tooltip_sel = (
+                    'button[data-tooltip*="telefone" i], button[data-tooltip*="phone" i], '
+                    'button[data-tooltip*="copiar" i], button[data-tooltip*="copy" i], '
+                    'button[data-tooltip*="call" i], button[data-tooltip*="ligar" i]'
+                )
+                for el in await page.locator(tooltip_sel).all():
+                    txt = await el.inner_text()
+                    if any(c in txt for c in "0123456789"):
+                        phone_candidates.append(txt)
+                    aria = await el.get_attribute("aria-label") or ""
+                    if any(c in aria for c in "0123456789"):
+                        phone_candidates.append(aria)
+            except Exception:
+                pass
 
-                # e) Varredura complementar em botões de ação do painel de detalhes
-                try:
-                    for btn in await search_context.locator('button[data-item-id], div[data-item-id]').all():
-                        b_aria = await btn.get_attribute("aria-label") or ""
-                        b_txt = await btn.inner_text()
-                        c_txt = f"{b_aria} {b_txt}"
-                        if any(c in c_txt for c in "0123456789"):
-                            for mc in re.findall(r"\+\s*[0-9\s().-]{7,25}", c_txt):
+            # e) Varredura complementar em botões de ação do painel
+            try:
+                for btn in await page.locator('button[data-item-id], div[data-item-id]').all():
+                    b_aria = await btn.get_attribute("aria-label") or ""
+                    b_txt = await btn.inner_text()
+                    c_txt = f"{b_aria} {b_txt}"
+                    if any(c in c_txt for c in "0123456789"):
+                        for mc in re.findall(r"\+\s*[0-9\s().-]{7,25}", c_txt):
+                            phone_candidates.append(mc)
+                        for mc in re.findall(r"(?:(?:\(?\d{1,4}\)?[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})", c_txt):
+                            digs = re.sub(r"\D", "", mc)
+                            if 8 <= len(digs) <= 15:
                                 phone_candidates.append(mc)
-                            for mc in re.findall(r"(?:(?:\(?\d{1,4}\)?[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})", c_txt):
-                                digs = re.sub(r"\D", "", mc)
-                                if 8 <= len(digs) <= 15:
-                                    phone_candidates.append(mc)
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
-            # f) Snippet do card do feed se contiver número explícito (internacional ou doméstico)
+            # f) Snippet do card do feed se contiver número explícito
             card_snippet_text = snip.get("card_text", "")
             if card_snippet_text:
                 for mc in re.findall(r"\+\s*[0-9\s().-]{7,25}", card_snippet_text):
@@ -980,25 +944,24 @@ class LeadScraper:
             # Prioridade 1: Website legítimo extraído do snippet do próprio card
             website = snip.get("website")
 
-            # Prioridade 2: Se não veio no snippet e o painel deste estabelecimento está sincronizado,
-            # busca ESTRITAMENTE dentro do container do painel.
-            # JAMAIS vasculha o DOM global para não contaminar com dados de outros cards do feed!
-            if not website and search_context:
-                site_selectors = [
+            # Prioridade 2: Se não veio no snippet, busca no botão oficial de authority no painel de detalhes.
+            # CRÍTICO: Exclui elementos dentro de div[role="feed"] para JAMAIS pegar o site de outros cards!
+            if not website:
+                panel_site_selectors = [
+                    'div:not([role="feed"]) a[data-item-id="authority"]',
+                    'div.TIHn2 a[data-item-id="authority"]',
+                    'div.m6QErb a[data-item-id="authority"]',
                     'a[data-item-id="authority"]',
-                    'a[data-item-id*="authority"]',
                     'a[aria-label*="Website:" i]',
                     'a[aria-label*="Site da Web:" i]',
                     'a[aria-label*="Site:" i]',
                     'a[aria-label*="Abrir site" i]',
                     'a[aria-label*="Open website" i]',
-                    'a[data-tooltip*="site" i]',
-                    'a[data-tooltip*="website" i]',
                 ]
-                for sel in site_selectors:
+                for sel in panel_site_selectors:
                     try:
-                        site_elem = search_context.locator(sel).first
-                        if await site_elem.count() > 0:
+                        site_elem = page.locator(sel).first
+                        if await site_elem.count() > 0 and await site_elem.is_visible(timeout=300):
                             raw_href = await site_elem.get_attribute("href")
                             clean_site = extract_clean_website_url(raw_href)
                             if clean_site:
@@ -1035,20 +998,19 @@ class LeadScraper:
 
             # 5. Endereço
             address = ""
-            if search_context:
-                try:
-                    addr_elem = search_context.locator('button[data-tooltip*="endereço" i], button[data-tooltip*="address" i], button[data-item-id*="address"]').first
-                    if await addr_elem.is_visible(timeout=400):
-                        address = await addr_elem.get_attribute("aria-label") or await addr_elem.inner_text(timeout=400)
-                        address = (
-                            address.replace("Endereço: ", "")
-                            .replace("Endereço:\n", "")
-                            .replace("Address: ", "")
-                            .replace("Address:\n", "")
-                            .strip()
-                        )
-                except Exception:
-                    pass
+            try:
+                addr_elem = page.locator('button[data-tooltip*="endereço" i], button[data-tooltip*="address" i], button[data-item-id*="address"]').first
+                if await addr_elem.is_visible(timeout=400):
+                    address = await addr_elem.get_attribute("aria-label") or await addr_elem.inner_text(timeout=400)
+                    address = (
+                        address.replace("Endereço: ", "")
+                        .replace("Endereço:\n", "")
+                        .replace("Address: ", "")
+                        .replace("Address:\n", "")
+                        .strip()
+                    )
+            except Exception:
+                pass
 
             if not address:
                 address = f"Região Central — {target_city.title()}"
@@ -1071,56 +1033,55 @@ class LeadScraper:
                     elif "24 horas" in hours_text.lower():
                         closes_at = "24h"
 
-            if search_context:
-                try:
-                    oh_container = search_context.locator('div[data-item-id*="oh"], button[data-item-id*="oh"], div[aria-label*="horário"], div[aria-label*="Horário"]').first
-                    if await oh_container.is_visible(timeout=300):
-                        raw_summary = await oh_container.get_attribute("aria-label") or await oh_container.inner_text(timeout=300)
-                        raw_summary = raw_summary.replace("\n", " ").strip()
-                        if raw_summary:
-                            if "fechado" in raw_summary.lower():
-                                is_open = False
-                                closes_at = "Fechado"
-                            else:
-                                is_open = True
-                                match_close = re.search(r"fecha[^\d]*(\d{1,2}:\d{2})", raw_summary, re.IGNORECASE)
-                                if match_close:
-                                    closes_at = match_close.group(1)
-                                elif "24 horas" in raw_summary.lower():
-                                    closes_at = "24h"
+            try:
+                oh_container = page.locator('div[data-item-id*="oh"], button[data-item-id*="oh"], div[aria-label*="horário"], div[aria-label*="Horário"]').first
+                if await oh_container.is_visible(timeout=300):
+                    raw_summary = await oh_container.get_attribute("aria-label") or await oh_container.inner_text(timeout=300)
+                    raw_summary = raw_summary.replace("\n", " ").strip()
+                    if raw_summary:
+                        if "fechado" in raw_summary.lower():
+                            is_open = False
+                            closes_at = "Fechado"
+                        else:
+                            is_open = True
+                            match_close = re.search(r"fecha[^\d]*(\d{1,2}:\d{2})", raw_summary, re.IGNORECASE)
+                            if match_close:
+                                closes_at = match_close.group(1)
+                            elif "24 horas" in raw_summary.lower():
+                                closes_at = "24h"
 
-                        table_elem = search_context.locator('table.eKjhGd, table.wgFkxc, div[data-item-id*="oh"] table').first
-                        if not await table_elem.is_visible(timeout=150):
-                            try:
-                                await oh_container.click(timeout=500)
-                                await asyncio.sleep(0.2)
-                            except Exception:
-                                pass
+                    table_elem = page.locator('table.eKjhGd, table.wgFkxc, div[data-item-id*="oh"] table').first
+                    if not await table_elem.is_visible(timeout=150):
+                        try:
+                            await oh_container.click(timeout=500)
+                            await asyncio.sleep(0.2)
+                        except Exception:
+                            pass
 
-                        rows = await search_context.locator('table.eKjhGd tr, table.wgFkxc tr, div[data-item-id*="oh"] table tr').all()
-                        for r in rows:
-                            try:
-                                day_el = r.locator('td.ylH6lf, th, td:first-child').first
-                                time_el = r.locator('td.mxowUb, td.h39tFd, ul.cLHqxd, td:last-child').first
-                                if await day_el.is_visible(timeout=100):
-                                    day_str = (await day_el.inner_text(timeout=100)).strip().capitalize()
-                                    time_str = (await time_el.inner_text(timeout=100)).strip().replace("\n", " ")
-                                    if day_str and time_str:
-                                        weekly_hours[day_str] = time_str
-                            except Exception:
-                                continue
+                    rows = await page.locator('table.eKjhGd tr, table.wgFkxc tr, div[data-item-id*="oh"] table tr').all()
+                    for r in rows:
+                        try:
+                            day_el = r.locator('td.ylH6lf, th, td:first-child').first
+                            time_el = r.locator('td.mxowUb, td.h39tFd, ul.cLHqxd, td:last-child').first
+                            if await day_el.is_visible(timeout=100):
+                                day_str = (await day_el.inner_text(timeout=100)).strip().capitalize()
+                                time_str = (await time_el.inner_text(timeout=100)).strip().replace("\n", " ")
+                                if day_str and time_str:
+                                    weekly_hours[day_str] = time_str
+                        except Exception:
+                            continue
 
-                        if weekly_hours:
-                            order = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
-                            parts = []
-                            for d in order:
-                                if d in weekly_hours:
-                                    parts.append(f"{d[:3]}: {weekly_hours[d]}")
-                            hours_text = " | ".join(parts)
-                        elif raw_summary:
-                            hours_text = raw_summary
-                except Exception:
-                    pass
+                    if weekly_hours:
+                        order = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+                        parts = []
+                        for d in order:
+                            if d in weekly_hours:
+                                parts.append(f"{d[:3]}: {weekly_hours[d]}")
+                        hours_text = " | ".join(parts)
+                    elif raw_summary:
+                        hours_text = raw_summary
+            except Exception:
+                pass
 
             slug_base = f"{name}-{address}".lower()
             slug_hash = hashlib.md5(slug_base.encode("utf-8")).hexdigest()[:8]
