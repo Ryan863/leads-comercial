@@ -30,9 +30,12 @@ function InstagramIcon({ className = 'size-3' }: { className?: string }) {
 }
 import type { Lead } from '@/lib/leads'
 import {
+  detectLeadLanguage,
   generatePitch,
   getStoredPitchSettings,
   isLeadInSameCity,
+  SUPPORTED_LANGUAGES,
+  type PitchLanguage,
   type PitchSettings,
   type PitchTone,
   type SenderPersona,
@@ -51,6 +54,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
   const [variationIndex, setVariationIndex] = useState(0)
   const [selectedTone, setSelectedTone] = useState<PitchTone>('consultative')
   const [selectedPersona, setSelectedPersona] = useState<SenderPersona>('auto')
+  const [selectedLanguage, setSelectedLanguage] = useState<PitchLanguage>('auto')
   const [loadingAi, setLoadingAi] = useState(false)
   const [isAiGenerated, setIsAiGenerated] = useState(false)
   const [customPrompt, setCustomPrompt] = useState('')
@@ -63,11 +67,18 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
       const settings = getStoredPitchSettings()
       setSelectedTone(settings.tone || 'consultative')
       setSelectedPersona(settings.persona || 'auto')
+      const initialLang = (settings.language && settings.language !== 'auto') ? settings.language : 'auto'
+      setSelectedLanguage(initialLang)
       setVariationIndex(0)
       setIsAiGenerated(false)
       const initialText = generatePitch(
         lead,
-        { ...settings, persona: settings.persona || 'auto', tone: settings.tone || 'consultative' },
+        {
+          ...settings,
+          persona: settings.persona || 'auto',
+          tone: settings.tone || 'consultative',
+          language: initialLang,
+        },
         0,
       )
       setMessage(initialText)
@@ -85,7 +96,11 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
     if (!lead) return
     setSelectedPersona(persona)
     const settings = getStoredPitchSettings()
-    const nextText = generatePitch(lead, { ...settings, persona, tone: selectedTone }, variationIndex)
+    const nextText = generatePitch(
+      lead,
+      { ...settings, persona, tone: selectedTone, language: selectedLanguage },
+      variationIndex,
+    )
     setMessage(nextText)
     setIsAiGenerated(false)
   }
@@ -94,7 +109,24 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
     if (!lead) return
     setSelectedTone(tone)
     const settings = getStoredPitchSettings()
-    const nextText = generatePitch(lead, { ...settings, persona: selectedPersona, tone }, variationIndex)
+    const nextText = generatePitch(
+      lead,
+      { ...settings, persona: selectedPersona, tone, language: selectedLanguage },
+      variationIndex,
+    )
+    setMessage(nextText)
+    setIsAiGenerated(false)
+  }
+
+  function handleLanguageChange(lang: PitchLanguage) {
+    if (!lead) return
+    setSelectedLanguage(lang)
+    const settings = getStoredPitchSettings()
+    const nextText = generatePitch(
+      lead,
+      { ...settings, persona: selectedPersona, tone: selectedTone, language: lang },
+      variationIndex,
+    )
     setMessage(nextText)
     setIsAiGenerated(false)
   }
@@ -104,7 +136,11 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
     const nextIdx = variationIndex + 1
     setVariationIndex(nextIdx)
     const settings = getStoredPitchSettings()
-    const nextText = generatePitch(lead, { ...settings, persona: selectedPersona, tone: selectedTone }, nextIdx)
+    const nextText = generatePitch(
+      lead,
+      { ...settings, persona: selectedPersona, tone: selectedTone, language: selectedLanguage },
+      nextIdx,
+    )
     setMessage(nextText)
     setIsAiGenerated(false)
   }
@@ -119,7 +155,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           lead,
-          settings: { ...settings, persona: selectedPersona, tone: selectedTone },
+          settings: { ...settings, persona: selectedPersona, tone: selectedTone, language: selectedLanguage },
           customInstructions: customPrompt.trim() || undefined,
           variationIndex,
         }),
@@ -354,6 +390,29 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                       {showAiInput ? 'Ocultar' : 'IA'}
                     </button>
                   </div>
+                </div>
+
+                {/* Seletor Rápido de Idioma da Abordagem */}
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-2.5">
+                  <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                    <Globe className="size-3 text-primary" />
+                    Idioma do Pitch:
+                  </span>
+                  {SUPPORTED_LANGUAGES.map((l) => (
+                    <button
+                      key={l.code}
+                      type="button"
+                      onClick={() => handleLanguageChange(l.code)}
+                      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition ${
+                        selectedLanguage === l.code
+                          ? 'border border-primary bg-primary/20 text-primary font-bold shadow-sm'
+                          : 'border border-border bg-background/60 text-muted-foreground hover:bg-accent hover:text-foreground'
+                      }`}
+                    >
+                      <span>{l.flag}</span>
+                      <span>{l.code === 'auto' ? 'Auto' : l.label.split(' ')[0]}</span>
+                    </button>
+                  ))}
                 </div>
 
                 {/* Caixa de input opcional para IA */}

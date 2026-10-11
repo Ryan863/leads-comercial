@@ -134,6 +134,30 @@ def clean_phone(raw: str, default_ddd: str = "", default_country: str = "") -> T
         if digits.startswith("0") and len(digits) in (10, 11):
             return (f"+44 {digits[1:5]} {digits[5:]}", True)
 
+    if c in ("JP", "JAPAN", "JAPAO"):
+        if digits.startswith("0") and len(digits) in (10, 11):
+            return (f"+81 {digits[1:3]} {digits[3:7]}-{digits[7:]}", True)
+        if len(digits) in (9, 10):
+            return (f"+81 {digits[:2]} {digits[2:6]}-{digits[6:]}", True)
+        if digits.startswith("81"):
+            return (f"+{digits}", True)
+
+    if c in ("ES", "ESPANHA", "SPAIN"):
+        if len(digits) == 9:
+            return (f"+34 {digits[:3]} {digits[3:6]} {digits[6:]}", True)
+
+    if c in ("IT", "ITALIA", "ITALY"):
+        if len(digits) in (9, 10):
+            return (f"+39 {digits[:3]} {digits[3:6]} {digits[6:]}", True)
+
+    if c in ("DE", "ALEMANHA", "GERMANY"):
+        if digits.startswith("0") and len(digits) in (10, 11, 12):
+            return (f"+49 {digits[1:4]} {digits[4:]}", True)
+
+    if c in ("FR", "FRANCA", "FRANCE"):
+        if digits.startswith("0") and len(digits) == 10:
+            return (f"+33 {digits[1]} {digits[2:4]} {digits[4:6]} {digits[6:8]} {digits[8:]}", True)
+
     # 3. Brasil (Padrão quando DDD é informado ou número casa com DDD brasileiro)
     clean_def_ddd = re.sub(r"\D", "", default_ddd or "")
     b_digits = digits

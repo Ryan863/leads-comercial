@@ -126,7 +126,7 @@ function pickDDD(city: string) {
   return String(11 + (hash(lower) % 80)).padStart(2, '0')
 }
 
-export function generateLeads(query: string, count: number): Lead[] {
+export function generateLeads(query: string, count: number, countryCode?: string): Lead[] {
   const preset = NICHES.find((n) => n.match.test(query)) ?? GENERIC
   const city = parseCity(query)
   const ddd = pickDDD(city)
@@ -135,16 +135,28 @@ export function generateLeads(query: string, count: number): Lead[] {
   const usedPhones = new Set<string>()
   const leads: Lead[] = []
 
-  const isUS = /miami|new york|orlando|florida|california|texas|usa|eua|fl|ca|ny|tx/i.test(query)
-  const isAU = /sydney|melbourne|brisbane|australia|austrália|nsw|vic|qld/i.test(query)
-  const isUK = /london|manchester|uk|united kingdom|england/i.test(query)
+  const c = (countryCode || '').toUpperCase()
+  const isJP = c === 'JP' || /japan|japão|tokyo|osaka|kyoto|yokohama|shibuya/i.test(query)
+  const isUS = c === 'US' || /miami|new york|orlando|florida|california|texas|usa|eua|fl|ca|ny|tx/i.test(query)
+  const isAU = c === 'AU' || /sydney|melbourne|brisbane|australia|austrália|nsw|vic|qld/i.test(query)
+  const isUK = c === 'GB' || c === 'UK' || /london|manchester|uk|united kingdom|england/i.test(query)
+  const isES = c === 'ES' || /madrid|barcelona|valencia|espanha|spain/i.test(query)
+
+  const jpPrefixes = ['Sakura', 'Tokyo Craft', 'Komorebi', 'Fuji', 'Kyoto', 'Ginza', 'Shibuya', 'Hikari', 'Zenith', 'Asahi']
+  const jpSuffixes = ['Studio', 'Clinic', 'Cafe & Bar', 'Dental', 'Salon', 'Kitchen', 'Design', 'Consulting']
 
   for (let i = 0; i < count; i++) {
     let name = ''
     for (let tries = 0; tries < 25; tries++) {
-      const p = preset.prefixes[Math.floor(rand() * preset.prefixes.length)]
-      const s = preset.suffixes[Math.floor(rand() * preset.suffixes.length)]
-      name = `${p} ${s}`
+      if (isJP) {
+        const p = jpPrefixes[Math.floor(rand() * jpPrefixes.length)]
+        const s = jpSuffixes[Math.floor(rand() * jpSuffixes.length)]
+        name = `${p} ${s}`
+      } else {
+        const p = preset.prefixes[Math.floor(rand() * preset.prefixes.length)]
+        const s = preset.suffixes[Math.floor(rand() * preset.suffixes.length)]
+        name = `${p} ${s}`
+      }
       if (!usedNames.has(name)) break
     }
     usedNames.add(name)
@@ -156,7 +168,11 @@ export function generateLeads(query: string, count: number): Lead[] {
     // Formatação de telefone conforme a região
     let phone = ''
     for (let tries = 0; tries < 25; tries++) {
-      if (isUS) {
+      if (isJP) {
+        const p1 = Math.floor(1000 + rand() * 8990)
+        const p2 = Math.floor(1000 + rand() * 8990)
+        phone = `+81 3 ${p1}-${p2}`
+      } else if (isUS) {
         const p1 = Math.floor(200 + rand() * 790)
         const p2 = Math.floor(100 + rand() * 890)
         const p3 = Math.floor(1000 + rand() * 8990)
@@ -169,6 +185,10 @@ export function generateLeads(query: string, count: number): Lead[] {
         const p1 = Math.floor(1000 + rand() * 8990)
         const p2 = Math.floor(1000 + rand() * 8990)
         phone = `+44 20 ${p1} ${p2}`
+      } else if (isES) {
+        const p1 = Math.floor(100 + rand() * 890)
+        const p2 = Math.floor(100 + rand() * 890)
+        phone = `+34 91${p1} ${p2}`
       } else {
         const p1 = Math.floor(8100 + rand() * 1890)
         const p2 = Math.floor(1000 + rand() * 8990)
@@ -180,18 +200,22 @@ export function generateLeads(query: string, count: number): Lead[] {
 
     const closeHour = 18 + Math.floor(rand() * 4)
 
-    const address = isUS
-      ? `${Math.floor(100 + rand() * 8900)} Biscayne Blvd, ${city}, FL, Estados Unidos`
-      : isAU
-        ? `${Math.floor(10 + rand() * 890)} George St, ${city} NSW, Austrália`
-        : isUK
-          ? `${Math.floor(10 + rand() * 490)} Oxford St, ${city}, United Kingdom`
-          : `${STREETS[Math.floor(rand() * STREETS.length)]}, ${Math.floor(10 + rand() * 1900)} — ${city}`
+    const address = isJP
+      ? `${Math.floor(1 + rand() * 5)}-chome, Shibuya, Tokyo 150-0002, Japan`
+      : isUS
+        ? `${Math.floor(100 + rand() * 8900)} Biscayne Blvd, ${city}, FL, Estados Unidos`
+        : isAU
+          ? `${Math.floor(10 + rand() * 890)} George St, ${city} NSW, Austrália`
+          : isUK
+            ? `${Math.floor(10 + rand() * 490)} Oxford St, ${city}, United Kingdom`
+            : isES
+              ? `Calle Gran Vía, ${Math.floor(10 + rand() * 80)}, 28013 Madrid, España`
+              : `${STREETS[Math.floor(rand() * STREETS.length)]}, ${Math.floor(10 + rand() * 1900)} — ${city}`
 
     leads.push({
       id: `${handle}-${i}`,
       name,
-      category: preset.category[Math.floor(rand() * preset.category.length)],
+      category: isJP ? 'Local Business & Studio' : preset.category[Math.floor(rand() * preset.category.length)],
       phone,
       whatsapp: Boolean(phone),
       email: presence === 'none' && rand() > 0.5 ? null : `contact@${handle.slice(0, 18)}.com`,

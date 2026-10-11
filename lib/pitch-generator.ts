@@ -2,7 +2,49 @@ import type { Lead } from './leads'
 
 export type PitchTone = 'consultative' | 'preview' | 'direct'
 export type SenderPersona = 'auto' | 'ryan' | 'rvll' | 'dev'
-export type PitchLanguage = 'auto' | 'pt' | 'en' | 'es'
+export type PitchLanguage = 'auto' | 'pt' | 'en' | 'ja' | 'es' | 'it' | 'de' | 'fr'
+
+export const SUPPORTED_LANGUAGES = [
+  { code: 'auto' as const, label: 'Automático (País)', flag: '🌍' },
+  { code: 'pt' as const, label: 'Português', flag: '🇧🇷' },
+  { code: 'en' as const, label: 'English', flag: '🇺🇸' },
+  { code: 'ja' as const, label: '日本語 (Japonês)', flag: '🇯🇵' },
+  { code: 'es' as const, label: 'Español', flag: '🇪🇸' },
+  { code: 'it' as const, label: 'Italiano', flag: '🇮🇹' },
+  { code: 'de' as const, label: 'Deutsch', flag: '🇩🇪' },
+  { code: 'fr' as const, label: 'Français', flag: '🇫🇷' },
+] as const
+
+export function detectLeadLanguage(address?: string, name?: string): PitchLanguage {
+  const text = `${address || ''} ${name || ''}`.toLowerCase()
+
+  // 1. Japão
+  if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]|japan|japão|tokyo|osaka|kyoto|yokohama|nagoya|shibuya|shinjuku/i.test(text)) {
+    return 'ja'
+  }
+  // 2. Espanha / Países hispânicos
+  if (/spain|espanha|españa|mexico|méxico|argentina|colombia|chile|madrid|barcelona|buenos aires|valencia|bogota|santiago/i.test(text)) {
+    return 'es'
+  }
+  // 3. Itália
+  if (/italy|itália|italia|roma|rome|milano|milan|firenze|florence|napoli|torino/i.test(text)) {
+    return 'it'
+  }
+  // 4. Alemanha
+  if (/germany|alemanha|deutschland|berlin|munich|münchen|hamburg|frankfurt|köln/i.test(text)) {
+    return 'de'
+  }
+  // 5. França
+  if (/france|frança|paris|lyon|marseille|bordeaux|toulouse/i.test(text)) {
+    return 'fr'
+  }
+  // 6. Países de língua inglesa (EUA, Austrália, UK, Canadá, etc.)
+  if (/usa|united states|estados unidos|australia|austrália|uk|united kingdom|reino unido|england|canada|canadá|london|sydney|melbourne|brisbane|miami|new york|orlando|florida|california|texas|los angeles|chicago|toronto|vancouver|nsw|vic|qld|\bfl\b|\bca\b|\bny\b|\btx\b/i.test(text)) {
+    return 'en'
+  }
+  // Padrão Brasil / Portugal
+  return 'pt'
+}
 
 export type PitchSettings = {
   senderName: string
@@ -384,16 +426,115 @@ export function generatePitch(
   const presence = lead.presence
   const hasInstagram = presence === 'social' || (lead.website && /instagram\.com/i.test(lead.website))
 
-  // Detecta se a abordagem deve ser em inglês (EUA, Austrália, UK ou configurado)
-  const isTargetEnglish = settings.language === 'en' || (settings.language !== 'pt' && isInternationalLead(lead.address, lead.name))
+  // Resolve idioma final (configurado manualmente ou detectado pela localização do lead)
+  const lang = (settings.language && settings.language !== 'auto')
+    ? settings.language
+    : detectLeadLanguage(lead.address, lead.name)
 
-  if (isTargetEnglish) {
-    const greeting = `Hi ${recipient.display}, hope you're doing well!`
+  let activePersona = persona
+  if (persona === 'auto') {
+    activePersona = recipient.type === 'business' && variationIndex % 2 === 1 ? 'rvll' : 'ryan'
+  }
 
-    let activePersona = persona
-    if (persona === 'auto') {
-      activePersona = recipient.type === 'business' && variationIndex % 2 === 1 ? 'rvll' : 'ryan'
+  // 1. JAPONÊS (日本語) - Abordagem cortês empresarial (Keigo / 丁寧語)
+  if (lang === 'ja') {
+    const greeting = `${recipient.display}様、初めまして。突然のご連絡失礼いたします。`
+
+    let presentation = ''
+    if (activePersona === 'rvll') {
+      presentation = `Webサイト・LP制作を行っておりますRvllチームと申します。地域ビジネスや店舗様向けに、スマートフォンで見やすく問い合わせ・予約につながる公式ページの制作を行っております。`
+    } else if (activePersona === 'dev') {
+      presentation = `Web開発をしておりますエンジニアです。表示速度が速く、LINEやWebからの予約・集客に特化したサイト構築を行っております。`
+    } else {
+      presentation = `フリーランスでWebサイト制作をしております${senderName}と申します。スマートフォンに最適化された清潔感のあるホームページ制作を専門にしております。`
     }
+
+    let diagnosisAndValue = ''
+    if (hasInstagram) {
+      diagnosisAndValue = `Instagramでの素敵な発信を拝見いたしました。一方で、Google等で検索された新規のお客様がメニューや詳細をすぐに確認できる専用ページがあると、SNSのフォロワー様も迷わずスムーズにご予約・お問い合わせへと繋げることができます。`
+    } else if (presence === 'none') {
+      diagnosisAndValue = `Googleマップにて貴店を拝见したところ、専用の公式ホームページがまだ掲載されていないようでした。スマホで手軽に見られる清潔感のあるページを用意することで、初めてのお客様にも大きな安心感をお届けできます。`
+    } else {
+      diagnosisAndValue = `現在のオンラインでのご案内を拝見いたしました。現在8割以上のお客様がスマートフォンから検索されますので、表示速度が速く直感的に予約できる構造に整えることで、反響率を大幅に向上させることが可能です。`
+    }
+
+    let cta = `もしご興味がございましたら、貴店に合わせた簡単なプレビュー案を画像または動画でご案内できますが、いかがでしょうか？`
+    if (tone === 'direct') {
+      cta = `ご迷惑でなければ、今週中に簡単なデモ案をお送りすることも可能ですので、お気軽にお知らせください。`
+    }
+
+    return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
+  }
+
+  // 2. ESPANHOL (Español)
+  if (lang === 'es') {
+    const greeting = `Hola, ${recipient.display}, ¿cómo estás?`
+    let presentation = ''
+    if (activePersona === 'rvll') {
+      presentation = `Somos del equipo Rvll, especializados en el diseño de páginas web modernas y enfocadas en conversiones y citas directas por WhatsApp.`
+    } else if (activePersona === 'dev') {
+      presentation = `Soy desarrollador web enfocado en la creación de páginas institucionales rápidas, limpias y optimizadas para celulares.`
+    } else {
+      presentation = `Mi nombre es ${senderName}, soy desarrollador web y me dedico a crear sitios rápidos y prácticos para negocios locales.`
+    }
+
+    let diagnosisAndValue = ''
+    if (hasInstagram) {
+      diagnosisAndValue = `Vi su perfil en Instagram y el excelente trabajo que comparten. Sin embargo, quienes buscan en Google o entran al enlace de la bio muchas veces necesitan una página oficial donde ver todos los servicios y contactar directo por WhatsApp con 1 toque.`
+    } else if (presence === 'none') {
+      diagnosisAndValue = `Noté su negocio en Google y vi que no cuentan con un sitio web oficial. Tener una página propia brinda confianza inmediata, resuelve dudas frecuentes y facilita que nuevos clientes reserven directo por WhatsApp.`
+    } else {
+      diagnosisAndValue = `Estuve viendo su presencia online. Hoy más del 80% de los clientes busca por celular, y una página moderna ultra rápida suele duplicar la cantidad de contactos recibidos.`
+    }
+
+    let cta = '¿Tendrías interés en ver un modelo sencillo sin compromiso de cómo quedaría esta estructura para su negocio?'
+    if (tone === 'preview') {
+      cta = '¿Tendría sentido que te muestre una vista previa rápida de 1 minuto de cómo quedaría esta estructura?'
+    }
+
+    return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
+  }
+
+  // 3. ITALIANO
+  if (lang === 'it') {
+    const greeting = `Ciao ${recipient.display}, piacere di conoscerti!`
+    const presentation = activePersona === 'rvll'
+      ? `Siamo il team Rvll, specializzati nella realizzazione di siti web moderni e veloci pensati per convertire visitatori in prenotazioni dirette.`
+      : `Mi chiamo ${senderName}, sono uno sviluppatore web e creo siti puliti, veloci e ad alta conversione per attività locali.`
+    const diagnosisAndValue = hasInstagram
+      ? `Ho visto la vostra bella presenza su Instagram. Tuttavia, chi vi cerca su Google spesso ha bisogno di un sito ufficiale dove visualizzare tutti i servizi e contattarvi direttamente in un clic.`
+      : presence === 'none'
+        ? `Ho notato la vostra attività su Google e ho visto che non avete ancora un sito web ufficiale. Avere una pagina chiara e moderna trasmette subito fiducia e facilita le prenotazioni.`
+        : `Oggi oltre l'80% delle persone naviga da smartphone: un sito ultra-veloce ottimizzato per il contatto diretto raddoppia i messaggi ricevuti.`
+    const cta = `Ti farebbe piacere vedere un'anteprima veloce senza impegno di come potrebbe apparire il sito per la tua attività?`
+    return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
+  }
+
+  // 4. ALEMÃO (Deutsch)
+  if (lang === 'de') {
+    const greeting = `Hallo ${recipient.display}, ich hoffe, es geht Ihnen gut!`
+    const presentation = `Mein Name ist ${senderName}, ich bin Webentwickler und erstelle moderne, schnelle und für Mobilgeräte optimierte Websites für lokale Unternehmen.`
+    const diagnosisAndValue = presence === 'none'
+      ? `Ich habe Ihr Unternehmen auf Google gesehen und bemerkt, dass Sie noch keine offizielle Website haben. Eine klare mobile Website schafft sofortiges Vertrauen und ermöglicht direkte Buchungen.`
+      : `Eine moderne, schnelle Website verdoppelt oft die direkten Kundenanfragen über mobile Endgeräte.`
+    const cta = `Hätten Sie Interesse an einer kurzen, unverbindlichen Vorschau, wie so eine moderne Website für Ihr Unternehmen aussehen könnte?`
+    return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
+  }
+
+  // 5. FRANCÊS (Français)
+  if (lang === 'fr') {
+    const greeting = `Bonjour ${recipient.display}, j'espère que vous allez bien !`
+    const presentation = `Je m'appelle ${senderName}, je suis développeur web et je conçois des sites vitrines modernes, rapides et optimisés pour générer des prises de contact directes.`
+    const diagnosisAndValue = presence === 'none'
+      ? `J'ai remarqué votre établissement sur Google et j'ai vu que vous n'aviez pas encore de site officiel. Un site clair et soigné renforce la crédibilité et facilite la prise de contact en 1 clic.`
+      : `Aujourd'hui, plus de 80% des recherches se font sur mobile. Un site ultra-rapide permet souvent de doubler le taux de réservation.`
+    const cta = `Seriez-vous ouvert à voir un aperçu rapide et sans engagement de ce que cela donnerait pour votre établissement ?`
+    return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
+  }
+
+  // 6. INGLÊS (English - EUA, Austrália, UK, Canadá, etc.)
+  if (lang === 'en') {
+    const greeting = `Hi ${recipient.display}, hope you're doing well!`
 
     let presentation = ''
     if (activePersona === 'rvll') {

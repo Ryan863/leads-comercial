@@ -298,20 +298,23 @@ class LeadScraper:
         self,
         query: str,
         max_results: int = 10,
-        source: str = "auto"
+        source: str = "auto",
+        country: str = "auto"
     ) -> AsyncGenerator[Dict, None]:
         """
         Executa a varredura com streaming em tempo real.
         Garante restrição estrita à cidade alvo e desduplicação rigorosa de telefones.
         """
         clean_query = (query or "").strip()
-        logger.info(f"[RADAR-SCRAPER] Nova solicitação | Termo: '{clean_query}' | Limite: {max_results} | Origem: {source}")
+        logger.info(f"[RADAR-SCRAPER] Nova solicitação | Termo: '{clean_query}' | Limite: {max_results} | Origem: {source} | País: {country}")
 
         if not clean_query or len(clean_query) < 2:
             logger.warning("[RADAR-SCRAPER] Termo de busca vazio ou curto. Abortando.")
             return
 
         niche, target_city, target_state, target_country = parse_location_query(clean_query)
+        if country and country.lower() != "auto":
+            target_country = country.upper()
         logger.info(f"[RADAR-SCRAPER] Localização identificada -> Nicho: '{niche}' | Cidade: '{target_city}' | UF: '{target_state or 'Auto'}' | País: '{target_country}'")
 
         leads_found = 0

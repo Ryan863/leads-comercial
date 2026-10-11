@@ -58,11 +58,12 @@ app.add_middleware(
 
 
 class SearchJob:
-    def __init__(self, job_id: str, query: str, quantity: int, source: str):
+    def __init__(self, job_id: str, query: str, quantity: int, source: str, country: str = "auto"):
         self.job_id = job_id
         self.query = query
         self.quantity = quantity
         self.source = source
+        self.country = country
         self.status = "queued"  # queued, processing, completed, error
         self.leads: List[Dict] = []
         self.error: Optional[str] = None
@@ -80,6 +81,7 @@ class SearchRequest(BaseModel):
     query: str = Field(..., description="Termo de pesquisa (Ex: 'Pizzarias em Videira - SC')")
     quantity: int = Field(10, ge=1, le=100, description="Quantidade desejada de leads (1 a 100)")
     source: str = Field("auto", description="'auto', 'gmaps' ou 'osm'")
+    country: Optional[str] = Field("auto", description="País alvo ('auto', 'BR', 'US', 'AU', 'JP', 'GB', 'ES', etc.)")
 
     @field_validator("query")
     @classmethod
@@ -138,7 +140,8 @@ async def _run_scraper_task(job: SearchJob):
         async for lead in scraper_instance.scrape(
             query=job.query,
             max_results=job.quantity,
-            source=job.source
+            source=job.source,
+            country=job.country
         ):
             lead_id = lead.get("id") or str(uuid.uuid4())
             lead_name = (lead.get("name") or "").strip().lower()
@@ -204,7 +207,8 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks, re
         job_id=job_id,
         query=req.query,
         quantity=req.quantity,
-        source=req.source
+        source=req.source,
+        country=req.country or "auto"
     )
     jobs[job_id] = job
 
@@ -217,6 +221,7 @@ async def start_search(req: SearchRequest, background_tasks: BackgroundTasks, re
         "query": job.query,
         "quantity": job.quantity,
         "source": job.source,
+        "country": job.country,
         "stream_url": f"/api/backend/search/{job_id}/stream",
         "status_url": f"/api/backend/search/{job_id}/status"
     }

@@ -32,19 +32,49 @@ export async function POST(req: Request) {
         const persona = settings?.persona || 'auto'
         const hasInstagram = lead.presence === 'social' || (lead.website && /instagram\.com/i.test(lead.website))
 
-        const systemPrompt = `Você é um estrategista de prospecção comercial especializado em abordagem humanizada e consultiva para WhatsApp.
+        const targetLang = (settings?.language && settings.language !== 'auto')
+          ? settings.language
+          : (lead.address?.toLowerCase().includes('japan') || /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/i.test(lead.address + lead.name))
+            ? 'ja'
+            : (lead.address?.toLowerCase().match(/usa|united states|australia|uk|england|canada|london|sydney|miami|new york|california/i))
+              ? 'en'
+              : (lead.address?.toLowerCase().match(/spain|espanha|españa|mexico|argentina|colombia|madrid|barcelona/i))
+                ? 'es'
+                : (lead.address?.toLowerCase().match(/italy|itália|italia|roma|milano/i))
+                  ? 'it'
+                  : (lead.address?.toLowerCase().match(/germany|alemanha|berlin|munich/i))
+                    ? 'de'
+                    : (lead.address?.toLowerCase().match(/france|frança|paris/i))
+                      ? 'fr'
+                      : 'pt'
+
+        const languageInstructions: Record<string, string> = {
+          ja: 'IDIOMA E TONALIDADE OBRIGATÓRIOS: Escreva a mensagem INTEIRAMENTE em JAPONÊS (日本語) com Keigo polido empresarial (丁寧語/尊敬語). Dirija-se ao lead com "様" (ex: [Nome]様、初めまして。突然のご連絡失礼いたします。). Retorne todo o conteúdo 100% em japonês nativo sem misturar português.',
+          en: 'MANDATORY LANGUAGE: Write the entire message strictly in ENGLISH. Natural, professional, warm outreach tone suitable for US/UK/Australia businesses.',
+          es: 'IDIOMA OBLIGATORIO: Escribe todo el mensaje estrictamente en ESPAÑOL. Tono profesional, cálido y enfocado en negocios hispanohablantes.',
+          it: 'LINGUA OBBLIGATORIA: Scrivi l\'intero messaggio rigorosamente in ITALIANO. Tono professionale, cortese e moderno.',
+          de: 'PFLICHTSPRACHE: Schreiben Sie die gesamte Nachricht ausschließlich auf DEUTSCH. Professioneller und höflicher Ton.',
+          fr: 'LANGUE OBLIGATOIRE: Rédigez l\'intégralité du message strictement en FRANÇAIS. Ton professionnel, courtois et engageant.',
+          pt: 'IDIOMA: Escreva a mensagem em PORTUGUÊS (Brasil), natural, fluida e humanizada.',
+        }
+
+        const langPrompt = languageInstructions[targetLang] || languageInstructions.pt
+
+        const systemPrompt = `Você é um estrategista de prospecção comercial especializado em abordagem humanizada e consultiva para WhatsApp e mensagens diretas.
 Seu objetivo é escrever uma mensagem de abordagem sob medida para o lead fornecido, sem parecer cópia pronta ou mensagem de spam.
+
+${langPrompt}
 
 DIRETRIZES FUNDAMENTAIS:
 1. SAUDAÇÃO:
-   - Se for pessoa física / profissional da saúde (ex: "Marisangela da Silva - Fisioterapeuta Pélvica", "Dra. Jayne"): use o primeiro nome ("Olá, Marisangela, tudo bem?" ou "Olá, Jayne, tudo bem?").
-   - Se for empresa / clínica / espaço (ex: "Espaço Una Vita"): use a equipe ("Olá, equipe do Una Vita, tudo bem?").
+   - Se for pessoa física / profissional da saúde (ex: "Marisangela da Silva - Fisioterapeuta Pélvica", "Dra. Jayne"): use o primeiro nome ou título de respeito no idioma alvo.
+   - Se for empresa / clínica / espaço (ex: "Espaço Una Vita"): use a equipe ou nome da empresa.
 
 2. IDENTIDADE DO REMETENTE:
-   - Persona: ${persona === 'rvll' ? 'Apresente-se como a Equipe Rvll ("Somos da equipe Rvll...")' : persona === 'dev' ? 'Apresente-se como Desenvolvedor Web ("Sou desenvolvedor web focado em...")' : 'Apresente-se como Ryan ("Sou o Ryan / Meu nome é Ryan...")'}
+   - Persona: ${persona === 'rvll' ? 'Apresente-se como a Equipe Rvll' : persona === 'dev' ? 'Apresente-se como Desenvolvedor Web' : 'Apresente-se como Ryan'}
    - LOCALIZAÇÃO REGIONAL CRÍTICA:
      ${
-       isSameCity
+       isSameCity && targetLang === 'pt'
          ? `O lead é da mesma cidade do remetente (${settings?.senderCity || 'Videira'}). Você pode mencionar naturalmente que mora/é daqui da cidade e citar a rua/bairro local.`
          : `ATENÇÃO: O lead NÃO É da cidade do remetente! NÃO DIGA ONDE VOCÊ MORA, NÃO DIGA QUE É DA CIDADE DELE. Apenas apresente seu trabalho com o nicho dele e cite o espaço/consultório dele.`
      }
@@ -52,17 +82,17 @@ DIRETRIZES FUNDAMENTAIS:
 3. DIAGNÓSTICO E NECESSIDADE REAL DA EMPRESA:
    ${
      hasInstagram
-       ? `O lead JÁ TEM INSTAGRAM: Reconheça o bom trabalho e conteúdo no Instagram, mas aponte a dor/necessidade real: quem pesquisa pelo serviço no Google ou clica na bio muitas vezes não encontra uma página oficial para tirar dúvidas imediatas e agendar sem se perder nos posts do feed. Ter um site próprio estruturado valoriza o trabalho do Instagram e converte seguidores e pacientes direto no WhatsApp.`
+       ? `O lead JÁ TEM INSTAGRAM: Reconheça o bom trabalho no Instagram, mas aponte a necessidade real: quem pesquisa pelo serviço no Google ou clica na bio muitas vezes não encontra uma página oficial para tirar dúvidas imediatas e agendar sem se perder nos posts. Ter um site próprio estruturado valoriza o trabalho do Instagram e converte seguidores e pacientes direto para contato.`
        : lead.presence === 'none'
-         ? `O lead NÃO TEM SITE OFICIAL NO GOOGLE: Mostre que quem pesquisa pela clínica/empresa no Google não encontra uma página própria oficial reunindo todas as especialidades e horários. Um site limpo funciona como vitrine acolhedora, tira as dúvidas mais comuns e permite agendamento com 1 toque no WhatsApp.`
-         : `O lead JÁ TEM SITE: Foque na necessidade de velocidade e conversão móvel para WhatsApp, já que mais de 80% dos pacientes e clientes acessam via celular.`
+         ? `O lead NÃO TEM SITE OFICIAL: Mostre que quem pesquisa pela clínica/empresa no Google não encontra uma página própria oficial reunindo todas as especialidades e horários. Um site limpo funciona como vitrine acolhedora, tira as dúvidas mais comuns e permite agendamento direto.`
+         : `O lead JÁ TEM SITE: Foque na necessidade de velocidade e conversão móvel, já que mais de 80% dos clientes acessam via celular.`
    }
 
 4. ENCERRAMENTO (SOFT CTA):
-   - Termine SEMPRE com uma pergunta suave de fechamento sem pressão comercial (ex: "Faz sentido eu mostrar uma prévia de como ficaria essa estrutura?", "Teria interesse em avaliar a criação de um site próprio?", "Teria interesse em ver um modelo simples sem compromisso?").
+   - Termine SEMPRE com uma pergunta suave de fechamento sem pressão comercial (ex: oferecendo ver uma prévia ou modelo simples de como ficaria a vitrine).
 
 5. FORMATO:
-   - Retorne EXCLUSIVAMENTE o texto final da mensagem, formatado em parágrafos limpos com quebras de linha para envio direto no WhatsApp. Sem aspas no início/fim e sem explicações.`
+   - Retorne EXCLUSIVAMENTE o texto final da mensagem no idioma alvo, formatado em parágrafos limpos com quebras de linha para envio direto. Sem aspas no início/fim e sem explicações.`
 
         const userPrompt = `DADOS DO LEAD:
 Nome: ${lead.name}

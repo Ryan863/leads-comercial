@@ -6,6 +6,7 @@ import {
   DEFAULT_PITCH_SETTINGS,
   getStoredPitchSettings,
   saveStoredPitchSettings,
+  SUPPORTED_LANGUAGES,
   type PitchSettings,
   type PitchTone,
 } from '@/lib/pitch-generator'
@@ -156,24 +157,20 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
               <Globe className="size-3.5 text-primary" />
               Idioma da Mensagem de Abordagem
             </label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'auto' as const, label: 'Automático', desc: 'Inglês p/ EUA/Austrália/UK, Português p/ Brasil' },
-                { id: 'pt' as const, label: 'Português', desc: 'Sempre em Português' },
-                { id: 'en' as const, label: 'English', desc: 'Always in English (Global Outreach)' },
-              ].map((l) => (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {SUPPORTED_LANGUAGES.map((l) => (
                 <button
-                  key={l.id}
+                  key={l.code}
                   type="button"
-                  onClick={() => setSettings({ ...settings, language: l.id })}
-                  className={`flex flex-col items-start rounded-lg border p-2 text-left transition ${
-                    (settings.language || 'auto') === l.id
+                  onClick={() => setSettings({ ...settings, language: l.code })}
+                  className={`flex items-center gap-1.5 rounded-lg border p-2 text-left transition ${
+                    (settings.language || 'auto') === l.code
                       ? 'border-primary bg-primary/10 text-primary font-semibold'
                       : 'border-border bg-background/50 text-muted-foreground hover:bg-accent'
                   }`}
                 >
-                  <span className="text-xs">{l.label}</span>
-                  <span className="text-[10px] opacity-75">{l.desc}</span>
+                  <span className="text-base">{l.flag}</span>
+                  <span className="text-xs truncate">{l.label}</span>
                 </button>
               ))}
             </div>

@@ -19,6 +19,7 @@ export function RadarApp() {
   const [query, setQuery] = useState(DEMO_QUERY)
   const [scannedQuery, setScannedQuery] = useState('')
   const [quantity, setQuantity] = useState(10)
+  const [country, setCountry] = useState('auto')
   const [leads, setLeads] = useState<Lead[]>([])
   const [scanning, setScanning] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -94,7 +95,7 @@ export function RadarApp() {
 
     // Modo demonstração instantâneo forçado pelo usuário
     if (forceDemo) {
-      setLeads(generateLeads(term, quantity))
+      setLeads(generateLeads(term, quantity, country))
       setScanning(false)
       setProgress(100)
       return
@@ -114,7 +115,7 @@ export function RadarApp() {
         const res = await fetch('/api/backend/search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: term, quantity, source: 'auto' }),
+          body: JSON.stringify({ query: term, quantity, source: 'auto', country }),
         })
 
         if (!res.ok) {
@@ -235,7 +236,7 @@ export function RadarApp() {
           clearInterval(timer.current)
           timer.current = null
           setTimeout(() => {
-            setLeads(generateLeads(term, quantity))
+            setLeads(generateLeads(term, quantity, country))
             setScanning(false)
           }, 250)
         }
@@ -326,9 +327,11 @@ export function RadarApp() {
       <SearchPanel
         query={query}
         quantity={quantity}
+        country={country}
         scanning={scanning}
         onQueryChange={setQuery}
         onQuantityChange={setQuantity}
+        onCountryChange={setCountry}
         onScan={(q) => runScan(q)}
       />
 
