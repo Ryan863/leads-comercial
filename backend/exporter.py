@@ -53,7 +53,7 @@ def extract_niche_and_city(query: str) -> Tuple[str, str]:
 
     try:
         from scraper import parse_location_query
-        niche, city, _ = parse_location_query(query)
+        niche, city, _, _ = parse_location_query(query)
         return (niche or "leads", city or "geral")
     except Exception:
         parts = re.split(r"\sem\s", query, flags=re.IGNORECASE)

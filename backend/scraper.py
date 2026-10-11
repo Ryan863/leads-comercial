@@ -318,6 +318,53 @@ def infer_regional_ddd(city: str, state: Optional[str] = None, query: str = "") 
     return ""
 
 
+def extract_clean_website_url(raw_url: Optional[str]) -> Optional[str]:
+    """
+    Limpa e valida links de website extraídos do Google Maps.
+    - Decodifica redirecionamentos do Google (/url?q=... ou google.com/url?q=...)
+    - Descarta links internos do Google/Maps/Waze/Goo.gl
+    - Garante URL HTTP/HTTPS válida com formato de domínio real
+    """
+    if not raw_url or not isinstance(raw_url, str):
+        return None
+    url = raw_url.strip()
+    if not url.startswith("http"):
+        return None
+
+    # Redirecionamento do Google (ex: https://www.google.com/url?q=https://...)
+    if "google." in url and "/url?" in url:
+        try:
+            parsed = urllib.parse.urlparse(url)
+            params = urllib.parse.parse_qs(parsed.query)
+            if "q" in params and params["q"]:
+                target_url = urllib.parse.unquote(params["q"][0]).strip()
+                if target_url.startswith("http"):
+                    url = target_url
+        except Exception:
+            pass
+
+    # Domínios internos do Google e mapas que não representam sites do estabelecimento
+    bad_domains = [
+        "google.com", "google.com.br", "gstatic.com", "waze.com",
+        "maps.google", "goo.gl", "ggpht.com", "googleapis.com"
+    ]
+    url_lower = url.lower()
+    for bad in bad_domains:
+        if f"://{bad}" in url_lower or f".{bad}" in url_lower or f"/{bad}" in url_lower:
+            return None
+
+    # Validação mínima de URL válida (deve conter ponto no hostname)
+    try:
+        parsed_final = urllib.parse.urlparse(url)
+        netloc = parsed_final.netloc.split(":")[0]
+        if not netloc or "." not in netloc:
+            return None
+    except Exception:
+        return None
+
+    return url
+
+
 class LeadScraper:
     def __init__(self):
         self.browser: Optional[Browser] = None
@@ -584,30 +631,54 @@ class LeadScraper:
                                 card_site_el = card.locator('a[data-value*="Site" i], a[data-value*="Website" i], a[aria-label*="site" i], a[aria-label*="website" i], a[data-item-id="authority"]').first
                                 if await card_site_el.count() > 0:
                                     c_href = await card_site_el.get_attribute("href")
-                                    if c_href and c_href.startswith("http") and not any(bad in c_href for bad in ["google.com", "gstatic.com", "waze.com", "maps.google"]):
-                                        snippet_data["website"] = c_href.strip()
+                                    clean_site = extract_clean_website_url(c_href)
+                                    if clean_site:
+                                        snippet_data["website"] = clean_site
                             except Exception:
                                 pass
 
                             # Clica no card para abrir o painel lateral com sincronização segura
+                            panel_synced = False
                             try:
                                 await link_el.scroll_into_view_if_needed(timeout=1000)
                                 await link_el.click(timeout=1500)
 
+                                # Tokens significativos do nome para correspondência precisa
+                                name_tokens = [w for w in norm_name.split() if len(w) > 2]
+                                if not name_tokens:
+                                    name_tokens = norm_name.split()[:2]
+
                                 # Sincroniza o painel: aguarda que o título do painel corresponda ao estabelecimento clicado
-                                for _ in range(8):
-                                    panel_title = page.locator("h1.DUwDvf, div.lMbq3e, h2.bPageTitle").first
-                                    if await panel_title.is_visible(timeout=250):
-                                        t_text = normalize_text(await panel_title.inner_text(timeout=250))
-                                        if any(part in t_text for part in norm_name.split()[:2]):
+                                for _ in range(10):
+                                    panel_title = page.locator("div[role='main'] h1, h1.DUwDvf, div.lMbq3e, h2.bPageTitle").first
+                                    if await panel_title.is_visible(timeout=200):
+                                        t_text = normalize_text(await panel_title.inner_text(timeout=200))
+                                        if any(part in t_text for part in name_tokens):
+                                            panel_synced = True
                                             break
                                     await asyncio.sleep(0.12)
 
-                                await asyncio.sleep(0.35)
+                                # Se ainda não sincronizou, tenta um novo clique direto no link
+                                if not panel_synced:
+                                    try:
+                                        await link_el.click(timeout=800)
+                                        await asyncio.sleep(0.25)
+                                        panel_title = page.locator("div[role='main'] h1, h1.DUwDvf, div.lMbq3e, h2.bPageTitle").first
+                                        if await panel_title.is_visible(timeout=250):
+                                            t_text = normalize_text(await panel_title.inner_text(timeout=250))
+                                            if any(part in t_text for part in name_tokens):
+                                                panel_synced = True
+                                    except Exception:
+                                        pass
+
+                                await asyncio.sleep(0.2)
                             except Exception as click_err:
                                 logger.debug(f"[GMAPS] Aviso ao abrir detalhes do card {index} ({name}): {click_err}")
 
-                            lead_data = await self._extract_place_details(page, name, query, target_city, snippet_data, target_country=target_country)
+                            lead_data = await self._extract_place_details(
+                                page, name, query, target_city, snippet_data,
+                                target_country=target_country, panel_synced=panel_synced
+                            )
                             if not lead_data:
                                 continue
 
@@ -757,7 +828,8 @@ class LeadScraper:
         original_query: str,
         target_city: str,
         snippet: Optional[Dict] = None,
-        target_country: str = "BR"
+        target_country: str = "BR",
+        panel_synced: bool = True
     ) -> Optional[Dict]:
         """
         Extrai campos ricos do painel do estabelecimento no Google Maps
@@ -765,126 +837,134 @@ class LeadScraper:
         """
         snip = snippet or {}
         try:
+            # Contexto de busca:
+            # Se o painel estiver sincronizado com o estabelecimento atual, busca
+            # estritamente dentro do container do painel (div[role="main"]).
+            # JAMAIS vasculha a página global nem elementos de outros cards do feed!
+            panel_elem = page.locator('div[role="main"]').first
+            has_panel = panel_synced and (await panel_elem.count() > 0)
+            search_context = panel_elem if has_panel else None
+
             # 1. Categoria
             category = "Comércio e Serviços"
-            cat_elem = page.locator('button[jsaction*="category"], span.fontBodyMedium, button.DkEaL').first
-            try:
-                if await cat_elem.is_visible(timeout=500):
-                    txt = await cat_elem.inner_text(timeout=500)
-                    if txt and len(txt) < 50 and not any(c in txt for c in "0123456789"):
-                        category = txt.strip()
-            except Exception:
-                pass
+            if search_context:
+                cat_elem = search_context.locator('button[jsaction*="category"], span.fontBodyMedium, button.DkEaL').first
+                try:
+                    if await cat_elem.is_visible(timeout=400):
+                        txt = await cat_elem.inner_text(timeout=400)
+                        if txt and len(txt) < 50 and not any(c in txt for c in "0123456789"):
+                            category = txt.strip()
+                except Exception:
+                    pass
 
             # 2. Avaliação e Reviews legítimos
             rating: Optional[float] = snip.get("rating")
             reviews: int = snip.get("reviews", 0)
-            try:
-                rating_elem = page.locator('div.F7nice span[aria-hidden="true"], span.ceNzKf[aria-hidden="true"]').first
-                if await rating_elem.is_visible(timeout=400):
-                    r_txt = await rating_elem.inner_text(timeout=400)
-                    match = re.search(r"(\d+[\.,]\d+)", r_txt)
-                    if match:
-                        rating = float(match.group(1).replace(",", "."))
+            if search_context:
+                try:
+                    rating_elem = search_context.locator('div.F7nice span[aria-hidden="true"], span.ceNzKf[aria-hidden="true"]').first
+                    if await rating_elem.is_visible(timeout=300):
+                        r_txt = await rating_elem.inner_text(timeout=300)
+                        match = re.search(r"(\d+[\.,]\d+)", r_txt)
+                        if match:
+                            rating = float(match.group(1).replace(",", "."))
 
-                rev_elem = page.locator('div.F7nice span[aria-label*="avalia"], span[aria-label*="avaliaç"], span[aria-label*="review"]').first
-                if await rev_elem.is_visible(timeout=400):
-                    rev_aria = await rev_elem.get_attribute("aria-label") or await rev_elem.inner_text(timeout=400)
-                    match = re.search(r"([\d\.\,]+)", rev_aria)
-                    if match:
-                        clean_num = match.group(1).replace(".", "").replace(",", "")
-                        if clean_num.isdigit():
-                            reviews = int(clean_num)
-            except Exception:
-                pass
+                    rev_elem = search_context.locator('div.F7nice span[aria-label*="avalia"], span[aria-label*="avaliaç"], span[aria-label*="review"]').first
+                    if await rev_elem.is_visible(timeout=300):
+                        rev_aria = await rev_elem.get_attribute("aria-label") or await rev_elem.inner_text(timeout=300)
+                        match = re.search(r"([\d\.\,]+)", rev_aria)
+                        if match:
+                            clean_num = match.group(1).replace(".", "").replace(",", "")
+                            if clean_num.isdigit():
+                                reviews = int(clean_num)
+                except Exception:
+                    pass
 
             # 3. Telefone: Extração robusta priorizando os atributos com dígitos reais
-            # 3. Telefone: Extração robusta priorizando atributos com dígitos reais e seletores multilíngues
             phone_candidates: List[str] = []
 
-            # a) data-item-id contendo phone:tel: ou phone: (Ex: phone:tel:+13055986070, phone:tel:+81312345678)
-            try:
-                for el in await page.locator('[data-item-id*="phone:tel:"], [data-item-id^="phone:"], [data-item-id*="phone"]').all():
-                    item_id = await el.get_attribute("data-item-id") or ""
-                    match_tel = re.search(r"phone:(?:tel:)?([0-9+]+)", item_id)
-                    if match_tel:
-                        phone_candidates.append(match_tel.group(1))
-                    aria = await el.get_attribute("aria-label") or ""
-                    if any(c in aria for c in "0123456789"):
-                        phone_candidates.append(aria)
-                    txt = await el.inner_text()
-                    if any(c in txt for c in "0123456789"):
-                        phone_candidates.append(txt)
-            except Exception:
-                pass
+            if search_context:
+                # a) data-item-id contendo phone:tel: ou phone: (Ex: phone:tel:+13055986070, phone:tel:+81312345678)
+                try:
+                    for el in await search_context.locator('[data-item-id*="phone:tel:"], [data-item-id^="phone:"], [data-item-id*="phone"]').all():
+                        item_id = await el.get_attribute("data-item-id") or ""
+                        match_tel = re.search(r"phone:(?:tel:)?([0-9+]+)", item_id)
+                        if match_tel:
+                            phone_candidates.append(match_tel.group(1))
+                        aria = await el.get_attribute("aria-label") or ""
+                        if any(c in aria for c in "0123456789"):
+                            phone_candidates.append(aria)
+                        txt = await el.inner_text()
+                        if any(c in txt for c in "0123456789"):
+                            phone_candidates.append(txt)
+                except Exception:
+                    pass
 
-            # b) a[href^="tel:"]
-            try:
-                for el in await page.locator('a[href^="tel:"]').all():
-                    href = await el.get_attribute("href") or ""
-                    phone_candidates.append(re.sub(r"^tel:", "", href))
-            except Exception:
-                pass
+                # b) a[href^="tel:"]
+                try:
+                    for el in await search_context.locator('a[href^="tel:"]').all():
+                        href = await el.get_attribute("href") or ""
+                        phone_candidates.append(re.sub(r"^tel:", "", href))
+                except Exception:
+                    pass
 
-            # c) aria-label multilíngue contendo telefone/phone/call/ligar em múltiplos idiomas
-            try:
-                multi_aria_sel = (
-                    '[aria-label*="telefone" i], [aria-label*="Telefone:"], [aria-label*="phone" i], '
-                    '[aria-label*="Phone:"], [aria-label*="call" i], [aria-label*="ligar" i], '
-                    '[aria-label*="teléfono" i], [aria-label*="téléphone" i], [aria-label*="telefon" i], '
-                    '[aria-label*="telefono" i], [aria-label*="電話" i], [aria-label*="هاتف" i]'
-                )
-                for el in await page.locator(multi_aria_sel).all():
-                    aria = await el.get_attribute("aria-label") or ""
-                    if any(c in aria for c in "0123456789"):
-                        phone_candidates.append(aria)
-            except Exception:
-                pass
+                # c) aria-label multilíngue contendo telefone/phone/call/ligar no painel
+                try:
+                    multi_aria_sel = (
+                        '[aria-label*="telefone" i], [aria-label*="Telefone:"], [aria-label*="phone" i], '
+                        '[aria-label*="Phone:"], [aria-label*="call" i], [aria-label*="ligar" i], '
+                        '[aria-label*="teléfono" i], [aria-label*="téléphone" i], [aria-label*="telefon" i], '
+                        '[aria-label*="telefono" i]'
+                    )
+                    for el in await search_context.locator(multi_aria_sel).all():
+                        aria = await el.get_attribute("aria-label") or ""
+                        if any(c in aria for c in "0123456789"):
+                            phone_candidates.append(aria)
+                except Exception:
+                    pass
 
-            # d) Elementos com tooltip de telefone/cópia com dígitos reais no texto ou aria
-            try:
-                tooltip_sel = (
-                    'button[data-tooltip*="telefone" i], button[data-tooltip*="phone" i], '
-                    'button[data-tooltip*="copiar" i], button[data-tooltip*="copy" i], '
-                    'button[data-tooltip*="call" i], button[data-tooltip*="ligar" i]'
-                )
-                for el in await page.locator(tooltip_sel).all():
-                    txt = await el.inner_text()
-                    if any(c in txt for c in "0123456789"):
-                        phone_candidates.append(txt)
-                    aria = await el.get_attribute("aria-label") or ""
-                    if any(c in aria for c in "0123456789"):
-                        phone_candidates.append(aria)
-            except Exception:
-                pass
+                # d) Botões com tooltip de telefone no painel
+                try:
+                    tooltip_sel = (
+                        'button[data-tooltip*="telefone" i], button[data-tooltip*="phone" i], '
+                        'button[data-tooltip*="copiar" i], button[data-tooltip*="copy" i], '
+                        'button[data-tooltip*="call" i], button[data-tooltip*="ligar" i]'
+                    )
+                    for el in await search_context.locator(tooltip_sel).all():
+                        txt = await el.inner_text()
+                        if any(c in txt for c in "0123456789"):
+                            phone_candidates.append(txt)
+                        aria = await el.get_attribute("aria-label") or ""
+                        if any(c in aria for c in "0123456789"):
+                            phone_candidates.append(aria)
+                except Exception:
+                    pass
 
-            # e) Snippet do card do feed se contiver número explícito (internacional ou doméstico)
+                # e) Varredura complementar em botões de ação do painel de detalhes
+                try:
+                    for btn in await search_context.locator('button[data-item-id], div[data-item-id]').all():
+                        b_aria = await btn.get_attribute("aria-label") or ""
+                        b_txt = await btn.inner_text()
+                        c_txt = f"{b_aria} {b_txt}"
+                        if any(c in c_txt for c in "0123456789"):
+                            for mc in re.findall(r"\+\s*[0-9\s().-]{7,25}", c_txt):
+                                phone_candidates.append(mc)
+                            for mc in re.findall(r"(?:(?:\(?\d{1,4}\)?[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})", c_txt):
+                                digs = re.sub(r"\D", "", mc)
+                                if 8 <= len(digs) <= 15:
+                                    phone_candidates.append(mc)
+                except Exception:
+                    pass
+
+            # f) Snippet do card do feed se contiver número explícito (internacional ou doméstico)
             card_snippet_text = snip.get("card_text", "")
             if card_snippet_text:
-                # 1. Padrão internacional com +
                 for mc in re.findall(r"\+\s*[0-9\s().-]{7,25}", card_snippet_text):
                     phone_candidates.append(mc)
-                # 2. Padrão numérico geral com pontuação
                 for mc in re.findall(r"(?:(?:\(?\d{1,4}\)?[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})", card_snippet_text):
                     digs = re.sub(r"\D", "", mc)
                     if 8 <= len(digs) <= 15:
                         phone_candidates.append(mc)
-
-            # f) Varredura complementar em botões de ação do painel de detalhes
-            try:
-                for btn in await page.locator('button[data-item-id], div[data-item-id]').all():
-                    b_aria = await btn.get_attribute("aria-label") or ""
-                    b_txt = await btn.inner_text()
-                    c_txt = f"{b_aria} {b_txt}"
-                    if any(c in c_txt for c in "0123456789"):
-                        for mc in re.findall(r"\+\s*[0-9\s().-]{7,25}", c_txt):
-                            phone_candidates.append(mc)
-                        for mc in re.findall(r"(?:(?:\(?\d{1,4}\)?[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})", c_txt):
-                            digs = re.sub(r"\D", "", mc)
-                            if 8 <= len(digs) <= 15:
-                                phone_candidates.append(mc)
-            except Exception:
-                pass
 
             regional_ddd = infer_regional_ddd(target_city, None, original_query)
             phone = ""
@@ -896,29 +976,33 @@ class LeadScraper:
                     is_whatsapp = is_wpp
                     break
 
-            # 4. Website Oficial e Presença Web (Imune a timeouts e com captura prévia)
+            # 4. Website Oficial e Presença Web
+            # Prioridade 1: Website legítimo extraído do snippet do próprio card
             website = snip.get("website")
-            if not website:
+
+            # Prioridade 2: Se não veio no snippet e o painel deste estabelecimento está sincronizado,
+            # busca ESTRITAMENTE dentro do container do painel.
+            # JAMAIS vasculha o DOM global para não contaminar com dados de outros cards do feed!
+            if not website and search_context:
                 site_selectors = [
                     'a[data-item-id="authority"]',
                     'a[data-item-id*="authority"]',
-                    'a[data-tooltip*="site" i]',
-                    'a[data-tooltip*="website" i]',
-                    'a[data-value*="Site" i]',
-                    'a[data-value*="Website" i]',
-                    'a[aria-label*="Website" i]',
-                    'a[aria-label*="Site da Web" i]',
+                    'a[aria-label*="Website:" i]',
+                    'a[aria-label*="Site da Web:" i]',
                     'a[aria-label*="Site:" i]',
                     'a[aria-label*="Abrir site" i]',
                     'a[aria-label*="Open website" i]',
+                    'a[data-tooltip*="site" i]',
+                    'a[data-tooltip*="website" i]',
                 ]
                 for sel in site_selectors:
                     try:
-                        site_elem = page.locator(sel).first
+                        site_elem = search_context.locator(sel).first
                         if await site_elem.count() > 0:
-                            href = await site_elem.get_attribute("href")
-                            if href and href.startswith("http") and not any(bad in href for bad in ["google.com", "gstatic.com", "waze.com", "maps.google"]):
-                                website = href.strip()
+                            raw_href = await site_elem.get_attribute("href")
+                            clean_site = extract_clean_website_url(raw_href)
+                            if clean_site:
+                                website = clean_site
                                 break
                     except Exception:
                         continue
@@ -951,19 +1035,20 @@ class LeadScraper:
 
             # 5. Endereço
             address = ""
-            try:
-                addr_elem = page.locator('button[data-tooltip*="endereço" i], button[data-tooltip*="address" i], button[data-item-id*="address"]').first
-                if await addr_elem.is_visible(timeout=500):
-                    address = await addr_elem.get_attribute("aria-label") or await addr_elem.inner_text(timeout=500)
-                    address = (
-                        address.replace("Endereço: ", "")
-                        .replace("Endereço:\n", "")
-                        .replace("Address: ", "")
-                        .replace("Address:\n", "")
-                        .strip()
-                    )
-            except Exception:
-                pass
+            if search_context:
+                try:
+                    addr_elem = search_context.locator('button[data-tooltip*="endereço" i], button[data-tooltip*="address" i], button[data-item-id*="address"]').first
+                    if await addr_elem.is_visible(timeout=400):
+                        address = await addr_elem.get_attribute("aria-label") or await addr_elem.inner_text(timeout=400)
+                        address = (
+                            address.replace("Endereço: ", "")
+                            .replace("Endereço:\n", "")
+                            .replace("Address: ", "")
+                            .replace("Address:\n", "")
+                            .strip()
+                        )
+                except Exception:
+                    pass
 
             if not address:
                 address = f"Região Central — {target_city.title()}"
@@ -986,55 +1071,56 @@ class LeadScraper:
                     elif "24 horas" in hours_text.lower():
                         closes_at = "24h"
 
-            try:
-                oh_container = page.locator('div[data-item-id*="oh"], button[data-item-id*="oh"], div[aria-label*="horário"], div[aria-label*="Horário"]').first
-                if await oh_container.is_visible(timeout=400):
-                    raw_summary = await oh_container.get_attribute("aria-label") or await oh_container.inner_text(timeout=300)
-                    raw_summary = raw_summary.replace("\n", " ").strip()
-                    if raw_summary:
-                        if "fechado" in raw_summary.lower():
-                            is_open = False
-                            closes_at = "Fechado"
-                        else:
-                            is_open = True
-                            match_close = re.search(r"fecha[^\d]*(\d{1,2}:\d{2})", raw_summary, re.IGNORECASE)
-                            if match_close:
-                                closes_at = match_close.group(1)
-                            elif "24 horas" in raw_summary.lower():
-                                closes_at = "24h"
+            if search_context:
+                try:
+                    oh_container = search_context.locator('div[data-item-id*="oh"], button[data-item-id*="oh"], div[aria-label*="horário"], div[aria-label*="Horário"]').first
+                    if await oh_container.is_visible(timeout=300):
+                        raw_summary = await oh_container.get_attribute("aria-label") or await oh_container.inner_text(timeout=300)
+                        raw_summary = raw_summary.replace("\n", " ").strip()
+                        if raw_summary:
+                            if "fechado" in raw_summary.lower():
+                                is_open = False
+                                closes_at = "Fechado"
+                            else:
+                                is_open = True
+                                match_close = re.search(r"fecha[^\d]*(\d{1,2}:\d{2})", raw_summary, re.IGNORECASE)
+                                if match_close:
+                                    closes_at = match_close.group(1)
+                                elif "24 horas" in raw_summary.lower():
+                                    closes_at = "24h"
 
-                    table_elem = page.locator('table.eKjhGd, table.wgFkxc, div[data-item-id*="oh"] table').first
-                    if not await table_elem.is_visible(timeout=150):
-                        try:
-                            await oh_container.click(timeout=500)
-                            await asyncio.sleep(0.2)
-                        except Exception:
-                            pass
+                        table_elem = search_context.locator('table.eKjhGd, table.wgFkxc, div[data-item-id*="oh"] table').first
+                        if not await table_elem.is_visible(timeout=150):
+                            try:
+                                await oh_container.click(timeout=500)
+                                await asyncio.sleep(0.2)
+                            except Exception:
+                                pass
 
-                    rows = await page.locator('table.eKjhGd tr, table.wgFkxc tr, div[data-item-id*="oh"] table tr').all()
-                    for r in rows:
-                        try:
-                            day_el = r.locator('td.ylH6lf, th, td:first-child').first
-                            time_el = r.locator('td.mxowUb, td.h39tFd, ul.cLHqxd, td:last-child').first
-                            if await day_el.is_visible(timeout=100):
-                                day_str = (await day_el.inner_text(timeout=100)).strip().capitalize()
-                                time_str = (await time_el.inner_text(timeout=100)).strip().replace("\n", " ")
-                                if day_str and time_str:
-                                    weekly_hours[day_str] = time_str
-                        except Exception:
-                            continue
+                        rows = await search_context.locator('table.eKjhGd tr, table.wgFkxc tr, div[data-item-id*="oh"] table tr').all()
+                        for r in rows:
+                            try:
+                                day_el = r.locator('td.ylH6lf, th, td:first-child').first
+                                time_el = r.locator('td.mxowUb, td.h39tFd, ul.cLHqxd, td:last-child').first
+                                if await day_el.is_visible(timeout=100):
+                                    day_str = (await day_el.inner_text(timeout=100)).strip().capitalize()
+                                    time_str = (await time_el.inner_text(timeout=100)).strip().replace("\n", " ")
+                                    if day_str and time_str:
+                                        weekly_hours[day_str] = time_str
+                            except Exception:
+                                continue
 
-                    if weekly_hours:
-                        order = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
-                        parts = []
-                        for d in order:
-                            if d in weekly_hours:
-                                parts.append(f"{d[:3]}: {weekly_hours[d]}")
-                        hours_text = " | ".join(parts)
-                    elif raw_summary:
-                        hours_text = raw_summary
-            except Exception:
-                pass
+                        if weekly_hours:
+                            order = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+                            parts = []
+                            for d in order:
+                                if d in weekly_hours:
+                                    parts.append(f"{d[:3]}: {weekly_hours[d]}")
+                            hours_text = " | ".join(parts)
+                        elif raw_summary:
+                            hours_text = raw_summary
+                except Exception:
+                    pass
 
             slug_base = f"{name}-{address}".lower()
             slug_hash = hashlib.md5(slug_base.encode("utf-8")).hexdigest()[:8]
@@ -1191,12 +1277,12 @@ class LeadScraper:
 
     def _extract_city(self, query: str) -> str:
         """Extrai o nome da cidade a partir da query do usuário."""
-        _, city, _ = parse_location_query(query)
+        _, city, _, _ = parse_location_query(query)
         return city
 
     def _extract_niche(self, query: str) -> str:
         """Extrai a categoria/nicho a partir da query do usuário."""
-        niche, _, _ = parse_location_query(query)
+        niche, _, _, _ = parse_location_query(query)
         return niche
 
     def _infer_ddd(self, location_text: str) -> str:
