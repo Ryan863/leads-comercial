@@ -9,6 +9,7 @@ export type Lead = {
   phone: string
   whatsapp: boolean
   email: string | null
+  instagram?: string | null
   rating: number | null
   reviews: number
   open: boolean
@@ -272,6 +273,12 @@ export function generateLeads(query: string, count: number, countryCode?: string
           : presence === 'social'
             ? `https://instagram.com/${handle.slice(0, 22)}`
             : null,
+      instagram:
+        presence === 'social'
+          ? `https://instagram.com/${handle.slice(0, 22)}`
+          : rand() > 0.4
+            ? `https://instagram.com/${handle.slice(0, 20)}`
+            : null,
       address,
     })
   }
@@ -288,6 +295,25 @@ export function whatsappLink(lead: Lead, customMessage?: string) {
   const message = customMessage ?? generatePitch(lead)
   const text = encodeURIComponent(message)
   return `https://wa.me/${digits}?text=${text}`
+}
+
+export function emailLink(lead: Lead, customMessage?: string) {
+  if (!lead.email) return null
+  const subject = `Oportunidade e Presença Digital — ${lead.name}`
+  const body = customMessage ?? generatePitch(lead)
+  return `mailto:${lead.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+}
+
+export function instagramLink(lead: Lead): string | null {
+  if (lead.instagram) return lead.instagram
+  if (lead.website && /instagram\.com/i.test(lead.website)) return lead.website
+  if (lead.presence === 'social' && lead.website) return lead.website
+  return null
+}
+
+export function googleContactSearchLink(lead: Lead): string {
+  const query = `${lead.name} ${lead.address} contato telefone whatsapp instagram`
+  return `https://www.google.com/search?q=${encodeURIComponent(query)}`
 }
 
 export function mapsLink(lead: Lead) {

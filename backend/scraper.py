@@ -673,6 +673,83 @@ class LeadScraper:
                     except Exception:
                         pass
 
+    async def _enrich_from_website(
+        self,
+        url: str,
+        target_country: str = "BR",
+        default_ddd: Optional[str] = None,
+        need_phone: bool = True
+    ) -> Tuple[Optional[str], bool, Optional[str], Optional[str]]:
+        """
+        Enriquece os dados do estabelecimento buscando telefone, e-mail e Instagram
+        diretamente no website da empresa com timeout estrito de 2.5s.
+        Retorna: (found_phone, is_wpp, found_email, found_instagram)
+        """
+        if not url or not url.startswith("http"):
+            return (None, False, None, None)
+
+        found_phone: Optional[str] = None
+        is_wpp: bool = False
+        found_email: Optional[str] = None
+        found_instagram: Optional[str] = None
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=2.5, follow_redirects=True, verify=False, headers=headers) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    html_chunk = resp.text[:150000]
+
+                    # 1. Instagram
+                    insta_matches = re.findall(r'https?://(?:www\.)?instagram\.com/([a-zA-Z0-9_.-]+)', html_chunk, re.IGNORECASE)
+                    for user in insta_matches:
+                        clean_u = user.strip("/?# ")
+                        if clean_u.lower() not in ("p", "explore", "stories", "reels", "about", "legal", "terms", "sharer", "instagram"):
+                            found_instagram = f"https://www.instagram.com/{clean_u}"
+                            break
+
+                    # 2. E-mail
+                    mailto_matches = re.findall(r'href=[\'"]mailto:([^\'"]+)[\'"]', html_chunk, re.IGNORECASE)
+                    for m in mailto_matches:
+                        clean_m = m.split("?")[0].strip()
+                        if "@" in clean_m and "." in clean_m:
+                            found_email = clean_m
+                            break
+
+                    if not found_email:
+                        raw_emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,7}\b', html_chunk)
+                        bad_domains = ("wixpress", "sentry", "google", "schema.org", "shopify", "wordpress", "example.com", "domain.com", "png", "jpg", "jpeg", "webp")
+                        for e in raw_emails:
+                            if not any(bad in e.lower() for bad in bad_domains) and not e.endswith((".png", ".jpg", ".svg", ".webp")):
+                                found_email = e
+                                break
+
+                    # 3. Telefone (se Maps não capturou)
+                    if need_phone:
+                        phone_cands = []
+                        tel_matches = re.findall(r'href=[\'"]tel:([^\'"]+)[\'"]', html_chunk, re.IGNORECASE)
+                        for t in tel_matches:
+                            phone_cands.append(t.split("?")[0].strip())
+
+                        for mc in re.findall(r'\+\s*[0-9\s().-]{7,25}', html_chunk):
+                            phone_cands.append(mc)
+
+                        for cand in phone_cands:
+                            fp, wpp = clean_phone(cand, default_ddd=default_ddd, default_country=target_country)
+                            if fp:
+                                found_phone = fp
+                                is_wpp = wpp
+                                break
+        except Exception:
+            pass
+
+        return (found_phone, is_wpp, found_email, found_instagram)
+
     async def _extract_place_details(
         self,
         page: Page,
@@ -848,6 +925,30 @@ class LeadScraper:
 
             presence, website_url = classify_web_presence(website)
 
+            email: Optional[str] = None
+            instagram: Optional[str] = None
+            if presence == "social" and website_url and "instagram.com" in website_url.lower():
+                instagram = website_url
+
+            # Enriquecimento inteligente: busca telefone, e-mail e Instagram diretamente no site
+            if website_url and presence == "site":
+                try:
+                    w_phone, w_wpp, w_email, w_insta = await self._enrich_from_website(
+                        website_url,
+                        target_country=target_country,
+                        default_ddd=regional_ddd,
+                        need_phone=not bool(phone)
+                    )
+                    if not phone and w_phone:
+                        phone = w_phone
+                        is_whatsapp = w_wpp
+                    if not email and w_email:
+                        email = w_email
+                    if not instagram and w_insta:
+                        instagram = w_insta
+                except Exception as enrich_err:
+                    logger.debug(f"[ENRICH] Aviso ao enriquecer via site {website_url}: {enrich_err}")
+
             # 5. Endereço
             address = ""
             try:
@@ -946,7 +1047,8 @@ class LeadScraper:
                 "category": category,
                 "phone": phone,
                 "whatsapp": is_whatsapp,
-                "email": None,
+                "email": email,
+                "instagram": instagram,
                 "rating": rating,
                 "reviews": reviews,
                 "open": is_open,

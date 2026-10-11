@@ -11,6 +11,7 @@ HEADERS = [
     "Telefone",
     "WhatsApp",
     "E-mail",
+    "Instagram",
     "Avaliação",
     "Avaliações",
     "Horários da Semana",
@@ -99,6 +100,7 @@ def export_to_csv(leads: List[Dict]) -> str:
             lead.get("phone", ""),
             "Sim" if lead.get("whatsapp") else "Não",
             lead.get("email") or "",
+            lead.get("instagram") or "",
             rating_str,
             reviews_str,
             hours_str,
@@ -129,6 +131,7 @@ def export_to_excel_html(leads: List[Dict]) -> str:
             f"<td>{l.get('phone', '')}</td>"
             f"<td>{'Sim' if l.get('whatsapp') else 'Não'}</td>"
             f"<td>{l.get('email') or ''}</td>"
+            f"<td>{l.get('instagram') or ''}</td>"
             f"<td>{rating_str}</td>"
             f"<td>{reviews_str}</td>"
             f"<td>{hours_str}</td>"

@@ -1,7 +1,17 @@
 'use client'
 
-import { ArrowUpRight, Mail, MapPin, MessageCircle, MessageSquareText, Star } from 'lucide-react'
-import { initials, mapsLink, whatsappLink, type Lead } from '@/lib/leads'
+import { ArrowUpRight, Globe, Mail, MapPin, MessageCircle, MessageSquareText, Star } from 'lucide-react'
+import { initials, mapsLink, whatsappLink, emailLink, instagramLink, type Lead } from '@/lib/leads'
+
+function InstagramIcon({ className = 'size-4' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="20" height="20" x="2" y="2" rx="5" ry="5" />
+      <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+      <line x1="17.5" x2="17.51" y1="6.5" y2="6.5" />
+    </svg>
+  )
+}
 
 const PRESENCE = {
   none: { label: 'Sem Site - Alta Prioridade', badge: 'border-hot/50 bg-hot/10 text-hot', avatar: 'from-red-500 to-red-700' },
@@ -26,6 +36,9 @@ function WebsiteValue({ lead }: { lead: Lead }) {
 
 function Actions({ lead, onNote, compact = false }: { lead: Lead; onNote: (l: Lead) => void; compact?: boolean }) {
   const hasPhone = Boolean(lead.phone && lead.phone.replace(/\D/g, '').length >= 8)
+  const insta = instagramLink(lead)
+  const hasEmail = Boolean(lead.email)
+  const hasWebsite = Boolean(lead.website && lead.presence === 'site')
 
   return (
     <div className="flex items-center gap-2">
@@ -42,25 +55,81 @@ function Actions({ lead, onNote, compact = false }: { lead: Lead; onNote: (l: Le
           <MessageCircle className="size-4" aria-hidden="true" />
           <span className={compact ? 'sr-only sm:not-sr-only' : ''}>Chamar no WhatsApp</span>
         </a>
-      ) : (
-        <span
-          className={`inline-flex h-10 items-center justify-center rounded-lg border border-border text-xs text-muted-foreground ${
+      ) : hasWebsite ? (
+        <a
+          href={lead.website!}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Abrir site oficial para enviar proposta pelo formulário ou chat"
+          className={`btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-primary/40 bg-primary/10 text-sm font-semibold text-primary shadow-sm transition hover:bg-primary/20 ${
             compact ? 'px-3' : 'flex-1'
           }`}
         >
-          Sem Telefone
-        </span>
+          <Globe className="size-4" aria-hidden="true" />
+          <span className={compact ? 'sr-only sm:not-sr-only' : ''}>Contato no Site</span>
+          <ArrowUpRight className="size-3.5 opacity-70" aria-hidden="true" />
+        </a>
+      ) : insta ? (
+        <a
+          href={insta}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Abrir perfil no Instagram para mandar mensagem no direct"
+          className={`btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-pink-500/40 bg-gradient-to-r from-purple-600/20 to-pink-600/20 text-sm font-semibold text-pink-400 shadow-sm transition hover:from-purple-600/30 hover:to-pink-600/30 ${
+            compact ? 'px-3' : 'flex-1'
+          }`}
+        >
+          <InstagramIcon className="size-4" />
+          <span className={compact ? 'sr-only sm:not-sr-only' : ''}>Instagram DM</span>
+          <ArrowUpRight className="size-3.5 opacity-70" aria-hidden="true" />
+        </a>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onNote(lead)}
+          title="Ver mensagem adaptada, dados de contato e buscar no Google"
+          className={`btn-press inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/10 text-xs font-semibold text-primary transition hover:bg-primary/20 ${
+            compact ? 'px-3' : 'flex-1'
+          }`}
+        >
+          <MessageSquareText className="size-4" aria-hidden="true" />
+          <span className={compact ? 'sr-only sm:not-sr-only' : ''}>Opções de Contato</span>
+        </button>
       )}
-      <a
-        href={lead.email ? `mailto:${lead.email}?subject=${encodeURIComponent(`Proposta para ${lead.name}`)}` : undefined}
-        aria-disabled={!lead.email}
-        className={`btn-press inline-flex h-10 items-center gap-1.5 rounded-lg border border-primary/50 bg-primary/10 px-3 text-sm font-medium text-primary-foreground transition hover:bg-primary/20 ${
-          lead.email ? '' : 'pointer-events-none opacity-40'
-        }`}
-      >
-        <Mail className="size-4" aria-hidden="true" />
-        E-mail
-      </a>
+
+      {/* Botão de E-mail ou Instagram Secundário */}
+      {hasEmail ? (
+        <a
+          href={emailLink(lead) ?? undefined}
+          title={`Enviar proposta por e-mail para ${lead.email}`}
+          className="btn-press inline-flex h-10 items-center gap-1.5 rounded-lg border border-primary/50 bg-primary/10 px-3 text-sm font-medium text-primary transition hover:bg-primary/20"
+        >
+          <Mail className="size-4" aria-hidden="true" />
+          <span className="hidden sm:inline">E-mail</span>
+        </a>
+      ) : insta && hasPhone ? (
+        <a
+          href={insta}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Abrir perfil do Instagram"
+          className="btn-press inline-flex h-10 items-center gap-1.5 rounded-lg border border-pink-500/40 bg-pink-500/10 px-3 text-sm font-medium text-pink-400 transition hover:bg-pink-500/20"
+        >
+          <InstagramIcon className="size-4" />
+          <span className="hidden sm:inline">Insta</span>
+        </a>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onNote(lead)}
+          title="Copiar mensagem adaptada para enviar por e-mail ou formulário"
+          className="btn-press inline-flex h-10 items-center gap-1.5 rounded-lg border border-border bg-card/60 px-3 text-xs font-medium text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+        >
+          <Mail className="size-4 opacity-60" aria-hidden="true" />
+          <span className="hidden sm:inline">E-mail</span>
+        </button>
+      )}
+
       <button
         type="button"
         onClick={() => onNote(lead)}
@@ -75,6 +144,7 @@ function Actions({ lead, onNote, compact = false }: { lead: Lead; onNote: (l: Le
         target="_blank"
         rel="noopener noreferrer"
         aria-label={`Abrir ${lead.name} no Google Maps`}
+        title="Ver localização e ficha completa no Google Maps"
         className="btn-press inline-flex size-10 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent hover:text-foreground"
       >
         <MapPin className="size-4" aria-hidden="true" />
@@ -105,9 +175,17 @@ export function LeadCard({ lead, onNote }: { lead: Lead; onNote: (l: Lead) => vo
 
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 text-sm">
         <div>
-          <dt className="text-xs text-muted-foreground">Telefone / WhatsApp:</dt>
+          <dt className="text-xs text-muted-foreground">Telefone / Contato:</dt>
           <dd className="mt-0.5 font-mono font-medium text-primary">
-            {lead.phone || <span className="text-xs font-normal italic text-muted-foreground">Não cadastrado no Google</span>}
+            {lead.phone || (
+              lead.email ? (
+                <span className="text-xs font-semibold text-emerald-400">E-mail: {lead.email}</span>
+              ) : lead.website ? (
+                <span className="text-xs font-normal text-sky-400">Via Site Oficial</span>
+              ) : (
+                <span className="text-xs font-normal italic text-muted-foreground">Sem telefone no Maps</span>
+              )
+            )}
           </dd>
         </div>
         <div>
@@ -149,7 +227,9 @@ export function LeadRow({ lead, onNote }: { lead: Lead; onNote: (l: Lead) => voi
         <div className="min-w-0">
           <h3 className="truncate font-semibold text-foreground">{lead.name}</h3>
           <p className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-            <span className="font-mono text-primary">{lead.phone || 'Sem telefone'}</span>
+            <span className="font-mono text-primary">
+              {lead.phone || (lead.email ? `E-mail: ${lead.email}` : lead.website ? 'Via Site Oficial' : 'Opções de Contato')}
+            </span>
             <span className="flex items-center gap-1">
               <Star className="size-3 fill-yellow-400 text-yellow-400" />
               {lead.rating != null ? `${lead.rating.toFixed(1)} (${lead.reviews})` : 'Sem avaliações'}

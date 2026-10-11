@@ -8,10 +8,12 @@ import {
   ExternalLink,
   Globe,
   Loader2,
+  Mail,
   MapPin,
   MessageCircle,
   Phone,
   RefreshCw,
+  Search,
   Settings,
   Sparkles,
   Star,
@@ -188,7 +190,9 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
   const storedSettings = typeof window !== 'undefined' ? getStoredPitchSettings() : null
   const baseCity = storedSettings?.senderCity || 'Videira'
   const isLocal = lead ? isLeadInSameCity(lead.address, baseCity) : false
-  const hasInstagram = lead?.presence === 'social' || (lead?.website && /instagram\.com/i.test(lead.website))
+  const instagramUrl = lead?.instagram || (lead?.website && /instagram\.com/i.test(lead.website) ? lead.website : (lead?.presence === 'social' && lead.website ? lead.website : null))
+  const hasInstagram = Boolean(instagramUrl)
+  const googleSearchUrl = lead ? `https://www.google.com/search?q=${encodeURIComponent(`${lead.name} ${lead.address} contato telefone whatsapp instagram`)}` : ''
 
   return (
     <>
@@ -240,8 +244,18 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
               {/* Badges de dados rápidos */}
               <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                 <div className="rounded-xl border border-border bg-background/50 p-2.5">
-                  <span className="text-[11px] font-medium text-muted-foreground">Telefone</span>
-                  <p className="mt-0.5 font-mono text-xs font-semibold text-primary">{lead.phone || 'Não informado no Google'}</p>
+                  <span className="text-[11px] font-medium text-muted-foreground">Telefone / Contato</span>
+                  <p className="mt-0.5 truncate font-mono text-xs font-semibold text-primary">
+                    {lead.phone || (
+                      lead.email ? (
+                        <span className="font-sans text-emerald-400">{lead.email}</span>
+                      ) : lead.website ? (
+                        <span className="font-sans text-sky-400">Via Site Oficial</span>
+                      ) : (
+                        <span className="font-sans italic text-muted-foreground">Sem tel no Maps</span>
+                      )
+                    )}
+                  </p>
                 </div>
                 <div className="rounded-xl border border-border bg-background/50 p-2.5">
                   <span className="text-[11px] font-medium text-muted-foreground">Presença Web</span>
@@ -473,8 +487,8 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                     {copied ? 'Mensagem Copiada!' : 'Copiar Texto'}
                   </button>
 
-                  <div className="flex items-center gap-2">
-                    {waUrl ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {waUrl && (
                       <a
                         href={waUrl}
                         target="_blank"
@@ -482,12 +496,67 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                         className="btn-press inline-flex items-center gap-2 rounded-lg bg-success px-4 py-2 text-xs font-bold text-background shadow-sm transition hover:brightness-110"
                       >
                         <MessageCircle className="size-4" />
-                        Chamar no WhatsApp com este Texto
+                        Chamar no WhatsApp
                       </a>
-                    ) : (
-                      <span className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-                        Sem telefone cadastrado no Google
-                      </span>
+                    )}
+
+                    {lead.phone && !waUrl && (
+                      <a
+                        href={`tel:${lead.phone}`}
+                        className="btn-press inline-flex items-center gap-2 rounded-lg border border-primary/50 bg-primary/10 px-4 py-2 text-xs font-bold text-primary transition hover:bg-primary/20"
+                      >
+                        <Phone className="size-4" />
+                        Ligar ({lead.phone})
+                      </a>
+                    )}
+
+                    {lead.website && lead.presence === 'site' && (
+                      <a
+                        href={lead.website}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn-press inline-flex items-center gap-2 rounded-lg border border-primary/50 bg-primary/15 px-3.5 py-2 text-xs font-bold text-primary transition hover:bg-primary/25"
+                      >
+                        <Globe className="size-4" />
+                        Acessar Site & Contato
+                        <ExternalLink className="size-3" />
+                      </a>
+                    )}
+
+                    {instagramUrl && (
+                      <a
+                        href={instagramUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn-press inline-flex items-center gap-2 rounded-lg border border-pink-500/40 bg-gradient-to-r from-purple-600/20 to-pink-600/20 px-3.5 py-2 text-xs font-bold text-pink-400 transition hover:from-purple-600/30 hover:to-pink-600/30"
+                      >
+                        <InstagramIcon className="size-4" />
+                        Enviar DM no Instagram
+                        <ExternalLink className="size-3" />
+                      </a>
+                    )}
+
+                    {lead.email && (
+                      <a
+                        href={`mailto:${lead.email}?subject=${encodeURIComponent(`Oportunidade e Presença Digital — ${lead.name}`)}&body=${encodeURIComponent(message)}`}
+                        className="btn-press inline-flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3.5 py-2 text-xs font-bold text-primary transition hover:bg-primary/20"
+                      >
+                        <Mail className="size-4" />
+                        Enviar por E-mail
+                      </a>
+                    )}
+
+                    {!waUrl && (
+                      <a
+                        href={googleSearchUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Pesquisar contatos, telefone e WhatsApp no Google"
+                        className="btn-press inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+                      >
+                        <Search className="size-3.5" />
+                        Buscar Contato no Google
+                      </a>
                     )}
                   </div>
                 </div>
