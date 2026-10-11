@@ -72,53 +72,88 @@ VALID_DDDS = {
     "91", "92", "93", "94", "95", "96", "97", "98", "99"
 }
 
-def clean_phone(raw: str, default_ddd: str = "") -> Tuple[str, bool]:
+def clean_phone(raw: str, default_ddd: str = "", default_country: str = "") -> Tuple[str, bool]:
     """
-    Limpa e valida números de telefone brasileiros com DDD válido (10 ou 11 dígitos),
-    evitando números corrompidos, CEPs, CNPJs ou fragmentos.
-    Se capturado sem DDD (8 ou 9 dígitos), aplica o default_ddd regional.
-    No Brasil comercial/B2B, tanto celulares quanto telefones fixos operam WhatsApp Business.
+    Limpa e formata números de telefone nacionais e internacionais (EUA, Austrália, UK, Brasil, etc.).
+    Preserva DDI internacional (ex: +1 para EUA, +61 para Austrália) ou aplica o país alvo.
+    Garante que qualquer contato comercial válido globalmente possua WhatsApp habilitado.
     """
     if not raw:
         return ("", False)
     
     digits = re.sub(r"\D", "", raw)
-    
-    # Remove código 55 do início se presente
-    if digits.startswith("55") and len(digits) in (12, 13):
-        digits = digits[2:]
+    if not digits or len(digits) < 7 or len(digits) > 16:
+        return ("", False)
         
-    # Remove zero inicial de discagem interurbana (ex: 071 9... ou 049 3...)
-    if digits.startswith("0") and len(digits) in (11, 12):
-        digits = digits[1:]
-        
-    # Se capturou número local sem DDD (8 ou 9 dígitos), aplica o DDD regional se fornecido
-    clean_def_ddd = re.sub(r"\D", "", default_ddd or "")
-    if len(digits) in (8, 9) and clean_def_ddd in VALID_DDDS:
-        digits = f"{clean_def_ddd}{digits}"
+    has_plus = raw.strip().startswith("+") or ("+" in raw[:4])
 
-    if len(digits) not in (10, 11):
-        return ("", False)
-        
-    ddd = digits[:2]
-    if ddd not in VALID_DDDS:
-        return ("", False)
-        
-    if len(digits) == 11:
-        # Celular no Brasil sempre começa com 9 após o DDD
-        first_subscriber_digit = digits[2]
-        if first_subscriber_digit != "9":
-            return ("", False)
-        formatted = f"({ddd}) {digits[2:7]}-{digits[7:]}"
-    else:  # len(digits) == 10
-        # Fixo no Brasil normalmente começa com 2, 3, 4 ou 5
-        first_subscriber_digit = digits[2]
-        if first_subscriber_digit not in ("2", "3", "4", "5"):
-            return ("", False)
-        formatted = f"({ddd}) {digits[2:6]}-{digits[6:]}"
-        
-    # Empresas e comércios no Brasil utilizam WhatsApp Business ativamente em números fixos e móveis
-    return (formatted, True)
+    # 1. Caso com '+' explícito (padrão internacional E.164 no Google Maps)
+    if has_plus:
+        # Estados Unidos / Canadá (+1)
+        if digits.startswith("1") and len(digits) == 11:
+            return (f"+1 ({digits[1:4]}) {digits[4:7]}-{digits[7:]}", True)
+            
+        # Austrália (+61)
+        if digits.startswith("61") and len(digits) in (10, 11, 12):
+            if digits.startswith("614"):  # Mobile (ex: +61 412 345 678)
+                return (f"+61 4{digits[3:5]} {digits[5:8]} {digits[8:]}", True)
+            return (f"+61 {digits[2]} {digits[3:7]} {digits[7:]}", True)
+            
+        # Reino Unido (+44)
+        if digits.startswith("44") and len(digits) in (11, 12, 13):
+            return (f"+44 {digits[2:6]} {digits[6:]}", True)
+            
+        # Brasil (+55)
+        if digits.startswith("55") and len(digits) in (12, 13):
+            sub = digits[2:]
+            if sub[:2] in VALID_DDDS:
+                if len(sub) == 11:
+                    return (f"({sub[:2]}) {sub[2:7]}-{sub[7:]}", True)
+                return (f"({sub[:2]}) {sub[2:6]}-{sub[6:]}", True)
+            return (f"+55 {sub}", True)
+            
+        return (f"+{digits}", True)
+
+    # 2. Formatação conforme o país alvo detectado na busca
+    c = (default_country or "").upper()
+    if c in ("US", "CA", "EUA", "USA"):
+        if len(digits) == 10:
+            return (f"+1 ({digits[:3]}) {digits[3:6]}-{digits[6:]}", True)
+        if len(digits) == 11 and digits.startswith("1"):
+            return (f"+1 ({digits[1:4]}) {digits[4:7]}-{digits[7:]}", True)
+            
+    if c in ("AU", "AUSTRALIA"):
+        if digits.startswith("0") and len(digits) == 10:
+            if digits.startswith("04"):
+                return (f"+61 4{digits[2:4]} {digits[4:7]} {digits[7:]}", True)
+            return (f"+61 {digits[1]} {digits[2:6]} {digits[6:]}", True)
+        if len(digits) == 9:
+            return (f"+61 {digits[0]} {digits[1:5]} {digits[5:]}", True)
+
+    if c in ("GB", "UK", "ENGLAND"):
+        if digits.startswith("0") and len(digits) in (10, 11):
+            return (f"+44 {digits[1:5]} {digits[5:]}", True)
+
+    # 3. Brasil (Padrão quando DDD é informado ou número casa com DDD brasileiro)
+    clean_def_ddd = re.sub(r"\D", "", default_ddd or "")
+    b_digits = digits
+    if b_digits.startswith("55") and len(b_digits) in (12, 13):
+        b_digits = b_digits[2:]
+    if b_digits.startswith("0") and len(b_digits) in (11, 12):
+        b_digits = b_digits[1:]
+    if len(b_digits) in (8, 9) and clean_def_ddd in VALID_DDDS:
+        b_digits = f"{clean_def_ddd}{b_digits}"
+
+    if len(b_digits) in (10, 11) and b_digits[:2] in VALID_DDDS:
+        ddd = b_digits[:2]
+        if len(b_digits) == 11:
+            return (f"({ddd}) {b_digits[2:7]}-{b_digits[7:]}", True)
+        return (f"({ddd}) {b_digits[2:6]}-{b_digits[6:]}", True)
+
+    # 4. Fallback Internacional Geral
+    if len(digits) == 10:
+        return (f"+1 ({digits[:3]}) {digits[3:6]}-{digits[6:]}", True)
+    return (f"+{digits}", True)
 
 def classify_web_presence(website: Optional[str]) -> Tuple[str, Optional[str]]:
     """

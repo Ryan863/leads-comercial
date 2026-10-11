@@ -141,9 +141,12 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
   }
 
   const rawDigits = lead?.phone?.replace(/\D/g, '') || ''
-  const cleanDigits = rawDigits.startsWith('55') && rawDigits.length >= 12 ? rawDigits.slice(2) : rawDigits
+  let cleanDigits = rawDigits
+  if (lead?.phone && !lead.phone.startsWith('+') && !rawDigits.startsWith('55') && (rawDigits.length === 10 || rawDigits.length === 11)) {
+    cleanDigits = `55${rawDigits}`
+  }
   const waUrl = cleanDigits && cleanDigits.length >= 8
-    ? `https://wa.me/55${cleanDigits}?text=${encodeURIComponent(message)}`
+    ? `https://wa.me/${cleanDigits}?text=${encodeURIComponent(message)}`
     : null
 
   const storedSettings = typeof window !== 'undefined' ? getStoredPitchSettings() : null

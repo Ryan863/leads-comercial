@@ -1,12 +1,13 @@
 'use client'
 
-import { Building2, Car, Loader2, Pizza, Search, Stethoscope, Zap } from 'lucide-react'
+import { Building2, Coffee, Loader2, Pizza, Search, Stethoscope, UtensilsCrossed, Zap } from 'lucide-react'
 
 const SUGGESTIONS = [
   { label: 'Pizzarias em Videira - SC', icon: Pizza },
-  { label: 'Clínicas em SP', icon: Stethoscope },
-  { label: 'Imobiliárias em Floripa', icon: Building2 },
-  { label: 'Mecânicas em Curitiba', icon: Car },
+  { label: 'Dentists in Miami - FL', icon: Stethoscope },
+  { label: 'Coffee in Sydney - Australia', icon: Coffee },
+  { label: 'Restaurants in London - UK', icon: UtensilsCrossed },
+  { label: 'Clínicas em SP', icon: Building2 },
 ]
 
 const QUANTITIES = [10, 20, 50, 100]
@@ -32,7 +33,7 @@ export function SearchPanel({ query, quantity, scanning, onQueryChange, onQuanti
       <div className="flex flex-col gap-4 md:flex-row md:items-end">
         <div className="flex-1">
           <label htmlFor="query" className="mb-2 block text-sm font-medium text-muted-foreground">
-            Termo de Pesquisa (Nicho + Cidade)
+            Termo de Pesquisa Global (Nicho + Cidade, Estado ou País)
           </label>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
@@ -40,7 +41,7 @@ export function SearchPanel({ query, quantity, scanning, onQueryChange, onQuanti
               id="query"
               value={query}
               onChange={(e) => onQueryChange(e.target.value)}
-              placeholder="Ex: Pizzarias em Videira - SC"
+              placeholder="Ex: Dentists in Miami - FL, Coffee in Sydney ou Pizzarias em Videira - SC"
               className="h-11 w-full rounded-lg border border-input bg-background/60 pl-10 pr-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30"
             />
           </div>

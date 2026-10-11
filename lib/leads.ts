@@ -112,9 +112,9 @@ function slug(text: string) {
 }
 
 function parseCity(query: string) {
-  const parts = query.split(/\sem\s/i)
-  let raw = (parts[1] ?? (query.includes('-') ? query.split('-')[1] : 'Sua Cidade')).trim()
-  raw = raw.replace(/[-,\s]+\b(ba|bahia|sc|sp|rj|pr|rs|mg|ce|pe|df)\b.*$/i, '').trim()
+  const parts = query.split(/\s+(?:em|in|en|at)\s+/i)
+  let raw = (parts[1] ?? (query.includes('-') ? query.split('-')[1] : (query.includes(',') ? query.split(',')[1] : 'Sua Cidade'))).trim()
+  raw = raw.replace(/[-,\s]+\b(ba|bahia|sc|sp|rj|pr|rs|mg|ce|pe|df|fl|ca|ny|tx|nsw|vic|qld)\b.*$/i, '').trim()
   return raw || 'Sua Cidade'
 }
 
@@ -135,6 +135,10 @@ export function generateLeads(query: string, count: number): Lead[] {
   const usedPhones = new Set<string>()
   const leads: Lead[] = []
 
+  const isUS = /miami|new york|orlando|florida|california|texas|usa|eua|fl|ca|ny|tx/i.test(query)
+  const isAU = /sydney|melbourne|brisbane|australia|austrália|nsw|vic|qld/i.test(query)
+  const isUK = /london|manchester|uk|united kingdom|england/i.test(query)
+
   for (let i = 0; i < count; i++) {
     let name = ''
     for (let tries = 0; tries < 25; tries++) {
@@ -149,17 +153,40 @@ export function generateLeads(query: string, count: number): Lead[] {
     const presence: WebPresence = roll < 0.4 ? 'none' : roll < 0.75 ? 'social' : 'site'
     const handle = slug(name)
 
-    // Desduplicação estrita de telefone
+    // Formatação de telefone conforme a região
     let phone = ''
     for (let tries = 0; tries < 25; tries++) {
-      const p1 = Math.floor(8100 + rand() * 1890)
-      const p2 = Math.floor(1000 + rand() * 8990)
-      phone = `(${ddd}) 9${p1}-${p2}`
+      if (isUS) {
+        const p1 = Math.floor(200 + rand() * 790)
+        const p2 = Math.floor(100 + rand() * 890)
+        const p3 = Math.floor(1000 + rand() * 8990)
+        phone = `+1 (${p1}) ${p2}-${p3}`
+      } else if (isAU) {
+        const p1 = Math.floor(1000 + rand() * 8990)
+        const p2 = Math.floor(1000 + rand() * 8990)
+        phone = `+61 2 ${p1} ${p2}`
+      } else if (isUK) {
+        const p1 = Math.floor(1000 + rand() * 8990)
+        const p2 = Math.floor(1000 + rand() * 8990)
+        phone = `+44 20 ${p1} ${p2}`
+      } else {
+        const p1 = Math.floor(8100 + rand() * 1890)
+        const p2 = Math.floor(1000 + rand() * 8990)
+        phone = `(${ddd}) 9${p1}-${p2}`
+      }
       if (!usedPhones.has(phone)) break
     }
     usedPhones.add(phone)
 
     const closeHour = 18 + Math.floor(rand() * 4)
+
+    const address = isUS
+      ? `${Math.floor(100 + rand() * 8900)} Biscayne Blvd, ${city}, FL, Estados Unidos`
+      : isAU
+        ? `${Math.floor(10 + rand() * 890)} George St, ${city} NSW, Austrália`
+        : isUK
+          ? `${Math.floor(10 + rand() * 490)} Oxford St, ${city}, United Kingdom`
+          : `${STREETS[Math.floor(rand() * STREETS.length)]}, ${Math.floor(10 + rand() * 1900)} — ${city}`
 
     leads.push({
       id: `${handle}-${i}`,
@@ -167,7 +194,7 @@ export function generateLeads(query: string, count: number): Lead[] {
       category: preset.category[Math.floor(rand() * preset.category.length)],
       phone,
       whatsapp: Boolean(phone),
-      email: presence === 'none' && rand() > 0.5 ? null : `contato@${handle.slice(0, 18)}.com.br`,
+      email: presence === 'none' && rand() > 0.5 ? null : `contact@${handle.slice(0, 18)}.com`,
       rating: Math.round((4.2 + rand() * 0.8) * 10) / 10,
       reviews: Math.floor(20 + rand() * 400),
       open: rand() > 0.25,
@@ -175,11 +202,11 @@ export function generateLeads(query: string, count: number): Lead[] {
       presence,
       website:
         presence === 'site'
-          ? `https://www.${handle.slice(0, 18)}.com.br`
+          ? `https://www.${handle.slice(0, 18)}.com`
           : presence === 'social'
             ? `https://instagram.com/${handle.slice(0, 22)}`
             : null,
-      address: `${STREETS[Math.floor(rand() * STREETS.length)]}, ${Math.floor(10 + rand() * 1900)} — ${city}`,
+      address,
     })
   }
 
@@ -187,11 +214,14 @@ export function generateLeads(query: string, count: number): Lead[] {
 }
 
 export function whatsappLink(lead: Lead, customMessage?: string) {
-  const digits = lead.phone.replace(/\D/g, '')
-  const cleanDigits = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits
+  let digits = lead.phone.replace(/\D/g, '')
+  // Para telefones brasileiros sem o DDI 55 explícito (10 ou 11 dígitos)
+  if (!lead.phone.startsWith('+') && !digits.startsWith('55') && (digits.length === 10 || digits.length === 11)) {
+    digits = `55${digits}`
+  }
   const message = customMessage ?? generatePitch(lead)
   const text = encodeURIComponent(message)
-  return `https://wa.me/55${cleanDigits}?text=${text}`
+  return `https://wa.me/${digits}?text=${text}`
 }
 
 export function mapsLink(lead: Lead) {

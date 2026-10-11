@@ -2,6 +2,7 @@ import type { Lead } from './leads'
 
 export type PitchTone = 'consultative' | 'preview' | 'direct'
 export type SenderPersona = 'auto' | 'ryan' | 'rvll' | 'dev'
+export type PitchLanguage = 'auto' | 'pt' | 'en' | 'es'
 
 export type PitchSettings = {
   senderName: string
@@ -10,6 +11,7 @@ export type PitchSettings = {
   persona: SenderPersona
   geminiApiKey?: string
   tone: PitchTone
+  language?: PitchLanguage
 }
 
 export const DEFAULT_PITCH_SETTINGS: PitchSettings = {
@@ -19,6 +21,7 @@ export const DEFAULT_PITCH_SETTINGS: PitchSettings = {
   persona: 'auto',
   geminiApiKey: '',
   tone: 'consultative',
+  language: 'auto',
 }
 
 const STORAGE_KEY = 'sondar_pitch_settings_v2'
@@ -58,9 +61,22 @@ export function isLeadInSameCity(address: string, senderCity = 'Videira'): boole
     .toLowerCase()
     .trim()
 
-  if (!cleanCity) return false
   const regex = new RegExp(`(^|[^a-z0-9])${cleanCity}([^a-z0-9]|$)`, 'i')
   return regex.test(cleanAddr)
+}
+
+/**
+ * Detecta se o lead é de um país internacional (EUA, Austrália, UK, Canadá, etc.)
+ */
+export function isInternationalLead(address?: string, name?: string): boolean {
+  const norm = `${address || ''} ${name || ''}`.toLowerCase()
+  const internationalKeywords = [
+    'usa', 'united states', 'estados unidos', 'australia', 'austrália', 'uk', 'united kingdom',
+    'reino unido', 'england', 'canada', 'canadá', 'london', 'sydney', 'melbourne', 'brisbane',
+    'miami', 'new york', 'orlando', 'florida', 'california', 'texas', 'los angeles', 'chicago',
+    'toronto', 'vancouver', 'nsw', 'vic', 'qld', 'fl 3', 'ca 9', 'ny 1', 'tx 7'
+  ]
+  return internationalKeywords.some((w) => norm.includes(w))
 }
 
 /**
@@ -368,7 +384,46 @@ export function generatePitch(
   const presence = lead.presence
   const hasInstagram = presence === 'social' || (lead.website && /instagram\.com/i.test(lead.website))
 
-  // 1. Saudação
+  // Detecta se a abordagem deve ser em inglês (EUA, Austrália, UK ou configurado)
+  const isTargetEnglish = settings.language === 'en' || (settings.language !== 'pt' && isInternationalLead(lead.address, lead.name))
+
+  if (isTargetEnglish) {
+    const greeting = `Hi ${recipient.display}, hope you're doing well!`
+
+    let activePersona = persona
+    if (persona === 'auto') {
+      activePersona = recipient.type === 'business' && variationIndex % 2 === 1 ? 'rvll' : 'ryan'
+    }
+
+    let presentation = ''
+    if (activePersona === 'rvll') {
+      presentation = `We're from the Rvll team, specializing in clean, modern, and high-converting websites designed to turn visitors into booked clients.`
+    } else if (activePersona === 'dev') {
+      presentation = `I'm a web developer focused on building fast, mobile-friendly landing pages that drive direct inquiries and appointments.`
+    } else {
+      presentation = `My name is ${senderName}, I'm a web developer creating clean, high-performance websites for ${specialty.isHealth ? 'healthcare practices' : specialty.isFood ? 'restaurants and food services' : 'local businesses'}.`
+    }
+
+    let diagnosisAndValue = ''
+    if (hasInstagram) {
+      diagnosisAndValue = `I came across your Instagram profile and loved your work! However, customers finding you on Google or clicking your bio link often look for an official mobile page with your full services, making it easy to book or contact you directly in one tap.`
+    } else if (presence === 'none') {
+      diagnosisAndValue = `I noticed ${lead.name} on Google and saw that customers searching for your services don't find an official dedicated website. Having a clean, dedicated website builds immediate credibility, answers key questions, and directs customers straight to your direct contact.`
+    } else {
+      diagnosisAndValue = `I checked your online presence. Today, over 80% of local searches happen on mobile phones, and having an ultra-fast page optimized for instant WhatsApp or call inquiries often doubles the inquiry rate.`
+    }
+
+    let cta = 'Would you be open to checking out a quick, no-obligation preview of what this structure could look like for your business?'
+    if (tone === 'direct') {
+      cta = 'Would you be interested in taking a look at a clean model sometime this week?'
+    } else if (tone === 'preview') {
+      cta = 'Would it make sense for me to share a quick 1-minute video preview of this layout?'
+    }
+
+    return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
+  }
+
+  // 1. Saudação em Português
   const greeting = `Olá, ${recipient.display}, tudo bem?`
 
   // 2. Apresentação adaptada (persona + mesma cidade ou de fora)

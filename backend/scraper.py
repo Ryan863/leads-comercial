@@ -70,21 +70,41 @@ def normalize_text(text: Optional[str]) -> str:
     ascii_text = nfkd.encode("ASCII", "ignore").decode("ASCII").lower()
     return re.sub(r"\s+", " ", ascii_text).strip()
 
-def parse_location_query(query: str) -> Tuple[str, str, Optional[str]]:
+def detect_country(location_text: str, full_query: str = "") -> str:
+    """Detecta o país alvo a partir da localização ou da consulta."""
+    norm = normalize_text(f"{location_text} {full_query}")
+    if any(w in norm for w in ["australia", "sydney", "melbourne", "brisbane", "perth", "adelaide", "gold coast", "nsw", "vic", "qld", "tas", "act"]):
+        return "AU"
+    if any(w in norm for w in [
+        "usa", "eua", "united states", "miami", "new york", "los angeles", "orlando",
+        "chicago", "houston", "austin", "dallas", "san francisco", "florida", "california",
+        "texas", "fl", "ca", "ny", "tx", "il", "wa", "seattle", "boston", "atlanta", "las vegas"
+    ]):
+        return "US"
+    if any(w in norm for w in ["uk", "united kingdom", "england", "london", "manchester", "birmingham", "liverpool", "reino unido"]):
+        return "GB"
+    if any(w in norm for w in ["portugal", "lisboa", "porto", "coimbra", "braga", "faro", "setubal"]):
+        return "PT"
+    if any(w in norm for w in ["canada", "toronto", "vancouver", "montreal", "calgary", "ottawa"]):
+        return "CA"
+    return "BR"
+
+def parse_location_query(query: str) -> Tuple[str, str, Optional[str], str]:
     """
     Analisa a query e extrai com precisão:
     - nicho (termo da atividade comercial)
-    - cidade alvo (nome da cidade limpo)
-    - estado alvo (UF de 2 letras)
+    - cidade/região alvo (nome limpo)
+    - estado alvo (UF ou sigla de estado)
+    - país alvo ("BR", "US", "AU", "GB", "PT", "CA", etc.)
     """
     raw = (query or "").strip()
     if not raw:
-        return ("", "Região Metropolitana", None)
+        return ("", "Global", None, "BR")
 
     niche = ""
     location_raw = ""
 
-    parts = re.split(r"\s+em\s+", raw, maxsplit=1, flags=re.IGNORECASE)
+    parts = re.split(r"\s+(?:em|in|en|at)\s+", raw, maxsplit=1, flags=re.IGNORECASE)
     if len(parts) > 1:
         niche = parts[0].strip()
         location_raw = parts[1].strip()
@@ -92,53 +112,47 @@ def parse_location_query(query: str) -> Tuple[str, str, Optional[str]]:
         sub = raw.split("-")
         niche = sub[0].strip()
         location_raw = "-".join(sub[1:]).strip()
+    elif "," in raw:
+        sub = raw.split(",")
+        niche = sub[0].strip()
+        location_raw = ",".join(sub[1:]).strip()
     else:
         tokens = raw.split()
         if len(tokens) >= 3 and normalize_text(tokens[-1]) in BRAZILIAN_STATES:
             target_state = BRAZILIAN_STATES[normalize_text(tokens[-1])]
-            return (" ".join(tokens[:-2]), tokens[-2], target_state)
+            return (" ".join(tokens[:-2]), tokens[-2], target_state, "BR")
         niche = raw
         location_raw = ""
 
-    if not location_raw:
-        norm_niche = normalize_text(niche)
-        for b_city in BAHIA_CITIES:
-            if b_city in norm_niche:
-                return (niche, b_city, "BA")
-        return (niche or "Empresas e Serviços", "Região Metropolitana", None)
-
+    country = detect_country(location_raw, raw)
     target_state: Optional[str] = None
-    loc_norm = normalize_text(location_raw)
 
-    sub_parts = [p.strip() for p in re.split(r"[-,\s]+", loc_norm) if p.strip()]
-    if sub_parts and sub_parts[-1] in BRAZILIAN_STATES:
-        target_state = BRAZILIAN_STATES[sub_parts[-1]]
-        loc_clean = re.sub(rf"[-,\s]+\b{re.escape(sub_parts[-1])}\b\s*$", "", location_raw, flags=re.IGNORECASE).strip()
-        if loc_clean:
-            location_raw = loc_clean
-    elif len(sub_parts) >= 2 and f"{sub_parts[-2]} {sub_parts[-1]}" in BRAZILIAN_STATES:
-        state_key = f"{sub_parts[-2]} {sub_parts[-1]}"
-        target_state = BRAZILIAN_STATES[state_key]
-        loc_clean = re.sub(rf"[-,\s]+\b{re.escape(state_key)}\b\s*$", "", location_raw, flags=re.IGNORECASE).strip()
-        if loc_clean:
-            location_raw = loc_clean
+    if country == "BR":
+        sub_parts = [p.strip() for p in re.split(r"[-,\s]+", normalize_text(location_raw)) if p.strip()]
+        if sub_parts and sub_parts[-1] in BRAZILIAN_STATES:
+            target_state = BRAZILIAN_STATES[sub_parts[-1]]
+            loc_clean = re.sub(rf"[-,\s]+\b{re.escape(sub_parts[-1])}\b\s*$", "", location_raw, flags=re.IGNORECASE).strip()
+            if loc_clean:
+                location_raw = loc_clean
+        elif not location_raw:
+            norm_niche = normalize_text(niche)
+            for b_city in BAHIA_CITIES:
+                if b_city in norm_niche:
+                    return (niche, b_city, "BA", "BR")
 
     clean_city = location_raw.strip(" -,")
     if not clean_city:
-        clean_city = "Região Metropolitana"
+        clean_city = "Global"
 
-    # Se o estado não foi explicitamente fornecido mas a cidade é uma cidade baiana reconhecida
-    if not target_state and normalize_text(clean_city) in BAHIA_CITIES:
-        target_state = "BA"
+    return (niche or "Business", clean_city, target_state, country)
 
-    return (niche or "Empresas e Serviços", clean_city, target_state)
-
-def is_location_match(address: str, target_city: str, target_state: Optional[str]) -> bool:
+def is_location_match(address: str, target_city: str, target_state: Optional[str], target_country: str = "BR") -> bool:
     """
-    Valida rigorosamente se o endereço capturado pertence à cidade e estado solicitados,
-    eliminando qualquer transbordo ou vazamento para municípios vizinhos.
+    Valida rigorosamente se o endereço capturado pertence à cidade/região solicitada.
+    No Brasil, elimina vazamento para municípios vizinhos.
+    Em buscas internacionais, aceita correspondência flexível adequada ao país alvo.
     """
-    if not target_city or normalize_text(target_city) in ("regiao metropolitana", "geral", "brasil", ""):
+    if not target_city or normalize_text(target_city) in ("regiao metropolitana", "geral", "brasil", "global", ""):
         return True
 
     norm_addr = normalize_text(address)
@@ -147,7 +161,16 @@ def is_location_match(address: str, target_city: str, target_state: Optional[str
     if not norm_addr:
         return True
 
-    # 1. Correspondência direta do nome da cidade no endereço
+    if target_country != "BR":
+        city_tokens = [t for t in norm_city.split() if len(t) > 2 and t not in ("the", "and", "in", "of")]
+        if any(t in norm_addr for t in city_tokens):
+            return True
+        if target_state and normalize_text(target_state) in norm_addr:
+            return True
+        # Aceita resultado dentro da área selecionada pelo Google Maps
+        return True
+
+    # 1. Correspondência direta do nome da cidade no endereço (Regra Brasileira Estrita)
     if norm_city in norm_addr:
         if target_state:
             norm_state = target_state.lower()
@@ -288,8 +311,8 @@ class LeadScraper:
             logger.warning("[RADAR-SCRAPER] Termo de busca vazio ou curto. Abortando.")
             return
 
-        niche, target_city, target_state = parse_location_query(clean_query)
-        logger.info(f"[RADAR-SCRAPER] Localização identificada -> Nicho: '{niche}' | Cidade: '{target_city}' | UF: '{target_state or 'Auto'}'")
+        niche, target_city, target_state, target_country = parse_location_query(clean_query)
+        logger.info(f"[RADAR-SCRAPER] Localização identificada -> Nicho: '{niche}' | Cidade: '{target_city}' | UF: '{target_state or 'Auto'}' | País: '{target_country}'")
 
         leads_found = 0
         collected_names: Set[str] = set()
@@ -306,7 +329,8 @@ class LeadScraper:
                     target_city,
                     target_state,
                     collected_names,
-                    collected_phones
+                    collected_phones,
+                    target_country=target_country
                 ):
                     leads_found += 1
                     logger.info(f"[RADAR-SCRAPER] [LEAD #{leads_found}/{max_results}] '{lead['name']}' | Tel: {lead['phone']} | Endereço: {lead['address']}")
@@ -352,7 +376,8 @@ class LeadScraper:
         target_city: str,
         target_state: Optional[str],
         collected_names: Set[str],
-        collected_phones: Set[str]
+        collected_phones: Set[str],
+        target_country: str = "BR"
     ) -> AsyncGenerator[Dict, None]:
         """
         Navegação automatizada no Google Maps com múltiplos seletores,
@@ -437,10 +462,10 @@ class LeadScraper:
                     except Exception:
                         pass
 
-                    lead_data = await self._extract_place_details(page, name, query, target_city)
+                    lead_data = await self._extract_place_details(page, name, query, target_city, target_country=target_country)
                     if lead_data:
                         # Validação de localidade e telefone
-                        if not is_location_match(lead_data.get("address", ""), target_city, target_state):
+                        if not is_location_match(lead_data.get("address", ""), target_city, target_state, target_country=target_country):
                             logger.info(f"[GMAPS] Descartando local único fora da cidade alvo: '{name}' ({lead_data.get('address')})")
                             return
 
@@ -541,13 +566,13 @@ class LeadScraper:
                             except Exception as click_err:
                                 logger.debug(f"[GMAPS] Aviso ao abrir detalhes do card {index} ({name}): {click_err}")
 
-                            lead_data = await self._extract_place_details(page, name, query, target_city, snippet_data)
+                            lead_data = await self._extract_place_details(page, name, query, target_city, snippet_data, target_country=target_country)
                             if not lead_data:
                                 continue
 
-                            # 1. VALIDAÇÃO ESTRITA DE CIDADE (Impede transbordo para outras cidades)
+                            # 1. VALIDAÇÃO DE CIDADE / PAÍS
                             lead_address = lead_data.get("address", "")
-                            if not is_location_match(lead_address, target_city, target_state):
+                            if not is_location_match(lead_address, target_city, target_state, target_country=target_country):
                                 logger.info(
                                     f"[GMAPS] Descartando lead fora da cidade alvo: '{name}' "
                                     f"(Endereço: '{lead_address}' não pertence a '{target_city}')"
@@ -613,7 +638,8 @@ class LeadScraper:
         name: str,
         original_query: str,
         target_city: str,
-        snippet: Optional[Dict] = None
+        snippet: Optional[Dict] = None,
+        target_country: str = "BR"
     ) -> Optional[Dict]:
         """
         Extrai campos ricos do painel do estabelecimento no Google Maps
@@ -706,7 +732,7 @@ class LeadScraper:
             phone = ""
             is_whatsapp = False
             for cand in phone_candidates:
-                formatted_p, is_wpp = clean_phone(cand, default_ddd=regional_ddd)
+                formatted_p, is_wpp = clean_phone(cand, default_ddd=regional_ddd, default_country=target_country)
                 if formatted_p:
                     phone = formatted_p
                     is_whatsapp = is_wpp
@@ -715,7 +741,7 @@ class LeadScraper:
             # 4. Website Oficial e Presença Web
             website = None
             try:
-                site_elem = page.locator('a[data-tooltip*="Abrir site"], a[data-item-id="authority"], a[data-value="Site"]').first
+                site_elem = page.locator('a[data-tooltip*="site" i], a[data-tooltip*="website" i], a[data-item-id="authority"], a[data-value="Site"]').first
                 if await site_elem.is_visible(timeout=500):
                     website = await site_elem.get_attribute("href")
             except Exception:
@@ -726,10 +752,16 @@ class LeadScraper:
             # 5. Endereço
             address = ""
             try:
-                addr_elem = page.locator('button[data-tooltip*="Copiar endereço"], button[data-item-id*="address"]').first
+                addr_elem = page.locator('button[data-tooltip*="endereço" i], button[data-tooltip*="address" i], button[data-item-id*="address"]').first
                 if await addr_elem.is_visible(timeout=500):
                     address = await addr_elem.get_attribute("aria-label") or await addr_elem.inner_text(timeout=500)
-                    address = address.replace("Endereço: ", "").replace("Endereço:\n", "").strip()
+                    address = (
+                        address.replace("Endereço: ", "")
+                        .replace("Endereço:\n", "")
+                        .replace("Address: ", "")
+                        .replace("Address:\n", "")
+                        .strip()
+                    )
             except Exception:
                 pass
 

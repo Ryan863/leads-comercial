@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Check, Key, MapPin, Sparkles, User, X } from 'lucide-react'
+import { Check, Globe, Key, MapPin, Sparkles, User, X } from 'lucide-react'
 import {
   DEFAULT_PITCH_SETTINGS,
   getStoredPitchSettings,
@@ -151,12 +151,40 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
             </div>
           </div>
 
+          <div>
+            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+              <Globe className="size-3.5 text-primary" />
+              Idioma da Mensagem de Abordagem
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'auto' as const, label: 'Automático', desc: 'Inglês p/ EUA/Austrália/UK, Português p/ Brasil' },
+                { id: 'pt' as const, label: 'Português', desc: 'Sempre em Português' },
+                { id: 'en' as const, label: 'English', desc: 'Always in English (Global Outreach)' },
+              ].map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setSettings({ ...settings, language: l.id })}
+                  className={`flex flex-col items-start rounded-lg border p-2 text-left transition ${
+                    (settings.language || 'auto') === l.id
+                      ? 'border-primary bg-primary/10 text-primary font-semibold'
+                      : 'border-border bg-background/50 text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  <span className="text-xs">{l.label}</span>
+                  <span className="text-[10px] opacity-75">{l.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
             <p className="font-semibold text-foreground">
-              📍 Regra de Localização Inteligente
+              📍 Regra de Localização Inteligente (Nacional & Global)
             </p>
             <p className="mt-1 leading-relaxed text-[11px]">
-              Se o lead for de <strong>{settings.senderCity || 'Videira'}</strong>, a mensagem menciona naturalmente que você mora/é daqui da cidade e cita a rua. Se a busca for em <strong>outra cidade</strong>, o sistema <strong>NÃO fala onde você mora</strong> e foca no nicho do cliente sem constrangimento.
+              Se o lead for de <strong>{settings.senderCity || 'Videira'}</strong>, a mensagem menciona naturalmente que você mora/é daqui da cidade e cita a rua. Se a busca for em <strong>outra cidade ou em outro país (ex: EUA, Austrália)</strong>, o sistema <strong>NÃO fala onde você mora</strong>, adapta o idioma e foca no nicho do cliente sem constrangimento.
             </p>
           </div>
 
