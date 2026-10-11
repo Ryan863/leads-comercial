@@ -73,6 +73,10 @@ def normalize_text(text: Optional[str]) -> str:
 def detect_country(location_text: str, full_query: str = "") -> str:
     """Detecta o país alvo a partir da localização ou da consulta."""
     norm = normalize_text(f"{location_text} {full_query}")
+    if any(w in norm for w in ["dubai", "emirados", "emirates", "uae", "abu dhabi", "sharjah", "ajman"]):
+        return "AE"
+    if any(w in norm for w in ["japao", "japan", "tokyo", "toquio", "osaka", "kyoto", "yokohama", "nagoya", "shibuya", "shinjuku"]):
+        return "JP"
     if any(w in norm for w in ["australia", "sydney", "melbourne", "brisbane", "perth", "adelaide", "gold coast", "nsw", "vic", "qld", "tas", "act"]):
         return "AU"
     if any(w in norm for w in [
@@ -85,6 +89,30 @@ def detect_country(location_text: str, full_query: str = "") -> str:
         return "GB"
     if any(w in norm for w in ["portugal", "lisboa", "porto", "coimbra", "braga", "faro", "setubal"]):
         return "PT"
+    if any(w in norm for w in ["espanha", "spain", "madrid", "barcelona", "valencia", "sevilha", "sevilla", "malaga"]):
+        return "ES"
+    if any(w in norm for w in ["italia", "italy", "roma", "rome", "milano", "milan", "napoli", "firenze", "florence", "torino"]):
+        return "IT"
+    if any(w in norm for w in ["alemanha", "germany", "deutschland", "berlin", "munich", "munchen", "hamburg", "frankfurt", "koln"]):
+        return "DE"
+    if any(w in norm for w in ["franca", "france", "paris", "lyon", "marseille", "bordeaux", "toulouse", "nice"]):
+        return "FR"
+    if any(w in norm for w in ["suica", "switzerland", "schweiz", "suisse", "zurich", "geneva", "genebra", "basel", "bern"]):
+        return "CH"
+    if any(w in norm for w in ["holanda", "netherlands", "paises baixos", "amsterdam", "rotterdam", "haia", "the hague", "utrecht"]):
+        return "NL"
+    if any(w in norm for w in ["irlanda", "ireland", "dublin", "cork", "galway"]):
+        return "IE"
+    if any(w in norm for w in ["belgica", "belgium", "bruxelas", "brussels", "antwerp", "ghent"]):
+        return "BE"
+    if any(w in norm for w in ["suecia", "sweden", "estocolmo", "stockholm", "gothenburg", "malmo"]):
+        return "SE"
+    if any(w in norm for w in ["noruega", "norway", "oslo", "bergen", "trondheim"]):
+        return "NO"
+    if any(w in norm for w in ["polonia", "poland", "varsovia", "warsaw", "cracovia", "krakow", "wroclaw"]):
+        return "PL"
+    if any(w in norm for w in ["austria", "viena", "vienna", "salzburg", "graz"]):
+        return "AT"
     if any(w in norm for w in ["canada", "toronto", "vancouver", "montreal", "calgary", "ottawa"]):
         return "CA"
     return "BR"
@@ -547,25 +575,35 @@ class LeadScraper:
                                     if clean_rev.isdigit():
                                         snippet_data["reviews"] = int(clean_rev)
 
-                                h_match = re.search(r"(Aberto[^\n·]*·?[^\n]*|Fechado[^\n·]*·?[^\n]*)", card_text)
+                                h_match = re.search(r"(Aberto[^\n·]*·?[^\n]*|Fechado[^\n·]*·?[^\n]*|Open[^\n·]*·?[^\n]*|Closed[^\n·]*·?[^\n]*)", card_text)
                                 if h_match:
                                     snippet_data["hours_text"] = h_match.group(1).strip()
 
+                            # Verifica se o card no feed já possui link de website direto
+                            try:
+                                card_site_el = card.locator('a[data-value*="Site" i], a[data-value*="Website" i], a[aria-label*="site" i], a[aria-label*="website" i], a[data-item-id="authority"]').first
+                                if await card_site_el.count() > 0:
+                                    c_href = await card_site_el.get_attribute("href")
+                                    if c_href and c_href.startswith("http") and not any(bad in c_href for bad in ["google.com", "gstatic.com", "waze.com", "maps.google"]):
+                                        snippet_data["website"] = c_href.strip()
+                            except Exception:
+                                pass
+
                             # Clica no card para abrir o painel lateral com sincronização segura
                             try:
-                                await link_el.scroll_into_view_if_needed(timeout=800)
-                                await link_el.click(timeout=1200)
+                                await link_el.scroll_into_view_if_needed(timeout=1000)
+                                await link_el.click(timeout=1500)
 
                                 # Sincroniza o painel: aguarda que o título do painel corresponda ao estabelecimento clicado
-                                for _ in range(6):
-                                    panel_title = page.locator("h1.DUwDvf").first
-                                    if await panel_title.is_visible(timeout=300):
-                                        t_text = normalize_text(await panel_title.inner_text(timeout=300))
+                                for _ in range(8):
+                                    panel_title = page.locator("h1.DUwDvf, div.lMbq3e, h2.bPageTitle").first
+                                    if await panel_title.is_visible(timeout=250):
+                                        t_text = normalize_text(await panel_title.inner_text(timeout=250))
                                         if any(part in t_text for part in norm_name.split()[:2]):
                                             break
-                                    await asyncio.sleep(0.15)
+                                    await asyncio.sleep(0.12)
 
-                                await asyncio.sleep(0.3)
+                                await asyncio.sleep(0.35)
                             except Exception as click_err:
                                 logger.debug(f"[GMAPS] Aviso ao abrir detalhes do card {index} ({name}): {click_err}")
 
@@ -684,15 +722,22 @@ class LeadScraper:
                 pass
 
             # 3. Telefone: Extração robusta priorizando os atributos com dígitos reais
+            # 3. Telefone: Extração robusta priorizando atributos com dígitos reais e seletores multilíngues
             phone_candidates: List[str] = []
 
-            # a) data-item-id contendo phone:tel: (Ex: phone:tel:+554935664747)
+            # a) data-item-id contendo phone:tel: ou phone: (Ex: phone:tel:+13055986070, phone:tel:+81312345678)
             try:
-                for el in await page.locator('[data-item-id*="phone:tel:"]').all():
+                for el in await page.locator('[data-item-id*="phone:tel:"], [data-item-id^="phone:"], [data-item-id*="phone"]').all():
                     item_id = await el.get_attribute("data-item-id") or ""
-                    match_tel = re.search(r"phone:tel:([0-9+]+)", item_id)
+                    match_tel = re.search(r"phone:(?:tel:)?([0-9+]+)", item_id)
                     if match_tel:
                         phone_candidates.append(match_tel.group(1))
+                    aria = await el.get_attribute("aria-label") or ""
+                    if any(c in aria for c in "0123456789"):
+                        phone_candidates.append(aria)
+                    txt = await el.inner_text()
+                    if any(c in txt for c in "0123456789"):
+                        phone_candidates.append(txt)
             except Exception:
                 pass
 
@@ -704,17 +749,29 @@ class LeadScraper:
             except Exception:
                 pass
 
-            # c) aria-label contendo Telefone:
+            # c) aria-label multilíngue contendo telefone/phone/call/ligar em múltiplos idiomas
             try:
-                for el in await page.locator('[aria-label*="Telefone:"], [aria-label*="telefone:"]').all():
+                multi_aria_sel = (
+                    '[aria-label*="telefone" i], [aria-label*="Telefone:"], [aria-label*="phone" i], '
+                    '[aria-label*="Phone:"], [aria-label*="call" i], [aria-label*="ligar" i], '
+                    '[aria-label*="teléfono" i], [aria-label*="téléphone" i], [aria-label*="telefon" i], '
+                    '[aria-label*="telefono" i], [aria-label*="電話" i], [aria-label*="هاتف" i]'
+                )
+                for el in await page.locator(multi_aria_sel).all():
                     aria = await el.get_attribute("aria-label") or ""
-                    phone_candidates.append(aria)
+                    if any(c in aria for c in "0123456789"):
+                        phone_candidates.append(aria)
             except Exception:
                 pass
 
-            # d) Elementos com tooltip de telefone que contenham dígitos reais no texto ou aria
+            # d) Elementos com tooltip de telefone/cópia com dígitos reais no texto ou aria
             try:
-                for el in await page.locator('button[data-tooltip*="telefone" i], button[data-tooltip*="Telefone"], div[data-item-id*="phone"]').all():
+                tooltip_sel = (
+                    'button[data-tooltip*="telefone" i], button[data-tooltip*="phone" i], '
+                    'button[data-tooltip*="copiar" i], button[data-tooltip*="copy" i], '
+                    'button[data-tooltip*="call" i], button[data-tooltip*="ligar" i]'
+                )
+                for el in await page.locator(tooltip_sel).all():
                     txt = await el.inner_text()
                     if any(c in txt for c in "0123456789"):
                         phone_candidates.append(txt)
@@ -724,12 +781,33 @@ class LeadScraper:
             except Exception:
                 pass
 
-            # e) Snippet do card do feed se contiver número explícito
+            # e) Snippet do card do feed se contiver número explícito (internacional ou doméstico)
             card_snippet_text = snip.get("card_text", "")
             if card_snippet_text:
-                m_card = re.findall(r"(?:\(?0?[1-9]{2}\)?\s*)?(?:9\s*)?[2-9]\d{3}[-\s]\d{4}", card_snippet_text)
-                for mc in m_card:
+                # 1. Padrão internacional com +
+                for mc in re.findall(r"\+\s*[0-9\s().-]{7,25}", card_snippet_text):
                     phone_candidates.append(mc)
+                # 2. Padrão numérico geral com pontuação
+                for mc in re.findall(r"(?:(?:\(?\d{1,4}\)?[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})", card_snippet_text):
+                    digs = re.sub(r"\D", "", mc)
+                    if 8 <= len(digs) <= 15:
+                        phone_candidates.append(mc)
+
+            # f) Varredura complementar em botões de ação do painel de detalhes
+            try:
+                for btn in await page.locator('button[data-item-id], div[data-item-id]').all():
+                    b_aria = await btn.get_attribute("aria-label") or ""
+                    b_txt = await btn.inner_text()
+                    c_txt = f"{b_aria} {b_txt}"
+                    if any(c in c_txt for c in "0123456789"):
+                        for mc in re.findall(r"\+\s*[0-9\s().-]{7,25}", c_txt):
+                            phone_candidates.append(mc)
+                        for mc in re.findall(r"(?:(?:\(?\d{1,4}\)?[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})", c_txt):
+                            digs = re.sub(r"\D", "", mc)
+                            if 8 <= len(digs) <= 15:
+                                phone_candidates.append(mc)
+            except Exception:
+                pass
 
             regional_ddd = infer_regional_ddd(target_city, None, original_query)
             phone = ""
@@ -741,14 +819,32 @@ class LeadScraper:
                     is_whatsapp = is_wpp
                     break
 
-            # 4. Website Oficial e Presença Web
-            website = None
-            try:
-                site_elem = page.locator('a[data-tooltip*="site" i], a[data-tooltip*="website" i], a[data-item-id="authority"], a[data-value="Site"]').first
-                if await site_elem.is_visible(timeout=500):
-                    website = await site_elem.get_attribute("href")
-            except Exception:
-                pass
+            # 4. Website Oficial e Presença Web (Imune a timeouts e com captura prévia)
+            website = snip.get("website")
+            if not website:
+                site_selectors = [
+                    'a[data-item-id="authority"]',
+                    'a[data-item-id*="authority"]',
+                    'a[data-tooltip*="site" i]',
+                    'a[data-tooltip*="website" i]',
+                    'a[data-value*="Site" i]',
+                    'a[data-value*="Website" i]',
+                    'a[aria-label*="Website" i]',
+                    'a[aria-label*="Site da Web" i]',
+                    'a[aria-label*="Site:" i]',
+                    'a[aria-label*="Abrir site" i]',
+                    'a[aria-label*="Open website" i]',
+                ]
+                for sel in site_selectors:
+                    try:
+                        site_elem = page.locator(sel).first
+                        if await site_elem.count() > 0:
+                            href = await site_elem.get_attribute("href")
+                            if href and href.startswith("http") and not any(bad in href for bad in ["google.com", "gstatic.com", "waze.com", "maps.google"]):
+                                website = href.strip()
+                                break
+                    except Exception:
+                        continue
 
             presence, website_url = classify_web_presence(website)
 

@@ -2,13 +2,14 @@ import type { Lead } from './leads'
 
 export type PitchTone = 'consultative' | 'preview' | 'direct'
 export type SenderPersona = 'auto' | 'ryan' | 'rvll' | 'dev'
-export type PitchLanguage = 'auto' | 'pt' | 'en' | 'ja' | 'es' | 'it' | 'de' | 'fr'
+export type PitchLanguage = 'auto' | 'pt' | 'en' | 'ja' | 'es' | 'it' | 'de' | 'fr' | 'ar'
 
 export const SUPPORTED_LANGUAGES = [
   { code: 'auto' as const, label: 'Automático (País)', flag: '🌍' },
   { code: 'pt' as const, label: 'Português', flag: '🇧🇷' },
   { code: 'en' as const, label: 'English', flag: '🇺🇸' },
   { code: 'ja' as const, label: '日本語 (Japonês)', flag: '🇯🇵' },
+  { code: 'ar' as const, label: 'العربية (Árabe/Dubai)', flag: '🇦🇪' },
   { code: 'es' as const, label: 'Español', flag: '🇪🇸' },
   { code: 'it' as const, label: 'Italiano', flag: '🇮🇹' },
   { code: 'de' as const, label: 'Deutsch', flag: '🇩🇪' },
@@ -18,28 +19,32 @@ export const SUPPORTED_LANGUAGES = [
 export function detectLeadLanguage(address?: string, name?: string): PitchLanguage {
   const text = `${address || ''} ${name || ''}`.toLowerCase()
 
-  // 1. Japão
+  // 1. Árabe explícito
+  if (/[\u0600-\u06ff]/.test(text)) {
+    return 'ar'
+  }
+  // 2. Japão
   if (/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]|japan|japão|tokyo|osaka|kyoto|yokohama|nagoya|shibuya|shinjuku/i.test(text)) {
     return 'ja'
   }
-  // 2. Espanha / Países hispânicos
+  // 3. Espanha / Países hispânicos
   if (/spain|espanha|españa|mexico|méxico|argentina|colombia|chile|madrid|barcelona|buenos aires|valencia|bogota|santiago/i.test(text)) {
     return 'es'
   }
-  // 3. Itália
+  // 4. Itália
   if (/italy|itália|italia|roma|rome|milano|milan|firenze|florence|napoli|torino/i.test(text)) {
     return 'it'
   }
-  // 4. Alemanha
-  if (/germany|alemanha|deutschland|berlin|munich|münchen|hamburg|frankfurt|köln/i.test(text)) {
+  // 5. Alemanha / Áustria / Suíça alemã
+  if (/germany|alemanha|deutschland|austria|áustria|berlin|munich|münchen|hamburg|frankfurt|köln|vienna|viena|zurich/i.test(text)) {
     return 'de'
   }
-  // 5. França
-  if (/france|frança|paris|lyon|marseille|bordeaux|toulouse/i.test(text)) {
+  // 6. França / Bélgica francófona / Suíça francesa
+  if (/france|frança|paris|lyon|marseille|bordeaux|toulouse|geneva|genebra|brussels|bruxelas/i.test(text)) {
     return 'fr'
   }
-  // 6. Países de língua inglesa (EUA, Austrália, UK, Canadá, etc.)
-  if (/usa|united states|estados unidos|australia|austrália|uk|united kingdom|reino unido|england|canada|canadá|london|sydney|melbourne|brisbane|miami|new york|orlando|florida|california|texas|los angeles|chicago|toronto|vancouver|nsw|vic|qld|\bfl\b|\bca\b|\bny\b|\btx\b/i.test(text)) {
+  // 7. Países de língua inglesa (EUA, Dubai/UAE comercial, Austrália, UK, Canadá, Irlanda, Holanda negócios)
+  if (/dubai|emirados|uae|abu dhabi|sharjah|usa|united states|estados unidos|australia|austrália|uk|united kingdom|reino unido|england|canada|canadá|ireland|irlanda|amsterdam|netherlands|london|sydney|melbourne|brisbane|miami|new york|orlando|florida|california|texas|los angeles|chicago|toronto|vancouver|dublin|nsw|vic|qld|\bfl\b|\bca\b|\bny\b|\btx\b/i.test(text)) {
     return 'en'
   }
   // Padrão Brasil / Portugal
@@ -461,6 +466,37 @@ export function generatePitch(
     let cta = `もしご興味がございましたら、貴店に合わせた簡単なプレビュー案を画像または動画でご案内できますが、いかがでしょうか？`
     if (tone === 'direct') {
       cta = `ご迷惑でなければ、今週中に簡単なデモ案をお送りすることも可能ですので、お気軽にお知らせください。`
+    }
+
+    return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
+  }
+
+  // 1.5. ÁRABE (العربية - Dubai / Emirados Árabes)
+  if (lang === 'ar') {
+    const greeting = `مرحباً ${recipient.display}، أتمنى أن تكونوا بخير!`
+    let presentation = ''
+    if (activePersona === 'rvll') {
+      presentation = `نحن من فريق Rvll، متخصصون في تصميم وتطوير مواقع إلكترونية عصرية وسريعة تركز على تحويل الزوار إلى حجوزات واستفسارات مباشرة عبر واتساب.`
+    } else if (activePersona === 'dev') {
+      presentation = `أنا مطور مواقع ويب متخصص في إنشاء صفحات هبوط سريعة وخفيفة ومتوافقة تماماً مع الهواتف الذكية لجلب العملاء.`
+    } else {
+      presentation = `اسمي ${senderName}، مطور مواقع ويب ومصمم صفحات هبوط متقدمة تركز على نمو الأعمال المحلية والخدمية.`
+    }
+
+    let diagnosisAndValue = ''
+    if (hasInstagram) {
+      diagnosisAndValue = `لقد اطلعت على حسابكم في إنستغرام وعملكم المميز! ومع ذلك، فإن العملاء الجدد القادمين من غوغل غالباً ما يبحثون عن صفحة رسمية متكاملة توضح كافة الخدمات وتتيح الحجز الفوري بضغطة زر واحدة.`
+    } else if (presence === 'none') {
+      diagnosisAndValue = `لاحظت نشاطكم التجاري على خرائط غوغل وتبيّن لي أنه ليس لديكم موقع رسمي مخصص حتى الآن. وجود موقع إلكتروني يعزز مصداقية العمل ويسهّل وصول العملاء للتواصل والحجز المباشر.`
+    } else {
+      diagnosisAndValue = `أكثر من 80% من عمليات البحث تتم اليوم عبر الهواتف، وامتلاك موقع حديث وفائق السرعة ومربوط بواتساب يضاعف عادةً عدد الاستفسارات الواردة.`
+    }
+
+    let cta = 'هل يناسبكم أن أشارككم نموذجاً مبسطاً وتصوراً سريعاً لكيفية ظهور هذه الصفحة لعملكم؟'
+    if (tone === 'preview') {
+      cta = 'هل ترغبون في رؤية فيديو توضيحي لمدة دقيقة يعرض هذا النموذج التجريبي؟'
+    } else if (tone === 'direct') {
+      cta = 'هل لديكم اهتمام بالاطلاع على نموذج تجريبي دون أي التزام خلال هذا الأسبوع؟'
     }
 
     return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`

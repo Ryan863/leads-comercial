@@ -12,6 +12,7 @@ export type CountryOption = {
 export const COUNTRIES: CountryOption[] = [
   { code: 'auto', name: 'Qualquer País / Auto', flag: '🌍', suggestQuery: 'Dentists in Miami - FL' },
   { code: 'BR', name: 'Brasil', flag: '🇧🇷', suggestQuery: 'Pizzarias em Videira - SC' },
+  { code: 'AE', name: 'Emirados Árabes (Dubai)', flag: '🇦🇪', suggestQuery: 'Clinics in Dubai UAE' },
   { code: 'US', name: 'Estados Unidos', flag: '🇺🇸', suggestQuery: 'Dentists in Miami - FL' },
   { code: 'AU', name: 'Austrália', flag: '🇦🇺', suggestQuery: 'Coffee in Sydney - Australia' },
   { code: 'JP', name: 'Japão (日本)', flag: '🇯🇵', suggestQuery: 'Coffee in Tokyo Japan' },
@@ -21,16 +22,25 @@ export const COUNTRIES: CountryOption[] = [
   { code: 'IT', name: 'Itália', flag: '🇮🇹', suggestQuery: 'Ristoranti a Roma' },
   { code: 'DE', name: 'Alemanha', flag: '🇩🇪', suggestQuery: 'Cafes in Berlin' },
   { code: 'FR', name: 'França', flag: '🇫🇷', suggestQuery: 'Restaurants in Paris' },
+  { code: 'CH', name: 'Suíça', flag: '🇨🇭', suggestQuery: 'Clinics in Zurich' },
+  { code: 'NL', name: 'Holanda / Países Baixos', flag: '🇳🇱', suggestQuery: 'Restaurants in Amsterdam' },
+  { code: 'IE', name: 'Irlanda', flag: '🇮🇪', suggestQuery: 'Cafes in Dublin' },
+  { code: 'BE', name: 'Bélgica', flag: '🇧🇪', suggestQuery: 'Clinics in Brussels' },
+  { code: 'SE', name: 'Suécia', flag: '🇸🇪', suggestQuery: 'Restaurants in Stockholm' },
+  { code: 'NO', name: 'Noruega', flag: '🇳🇴', suggestQuery: 'Cafes in Oslo' },
+  { code: 'PL', name: 'Polônia', flag: '🇵🇱', suggestQuery: 'Clinics in Warsaw' },
+  { code: 'AT', name: 'Áustria', flag: '🇦🇹', suggestQuery: 'Cafes in Vienna' },
   { code: 'CA', name: 'Canadá', flag: '🇨🇦', suggestQuery: 'Dentists in Toronto' },
 ]
 
 const SUGGESTIONS = [
   { label: 'Pizzarias em Videira - SC', icon: Pizza, country: 'BR' },
+  { label: 'Clinics in Dubai - UAE', icon: Stethoscope, country: 'AE' },
   { label: 'Dentists in Miami - FL', icon: Stethoscope, country: 'US' },
   { label: 'Coffee in Tokyo - Japan', icon: Coffee, country: 'JP' },
   { label: 'Coffee in Sydney - Australia', icon: Coffee, country: 'AU' },
   { label: 'Restaurants in London - UK', icon: UtensilsCrossed, country: 'GB' },
-  { label: 'Clínicas em São Paulo - SP', icon: Building2, country: 'BR' },
+  { label: 'Clinics in Zurich - Switzerland', icon: Building2, country: 'CH' },
 ]
 
 const QUANTITIES = [10, 20, 50, 100]

@@ -157,7 +157,7 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
               <Globe className="size-3.5 text-primary" />
               Idioma da Mensagem de Abordagem
             </label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {SUPPORTED_LANGUAGES.map((l) => (
                 <button
                   key={l.code}

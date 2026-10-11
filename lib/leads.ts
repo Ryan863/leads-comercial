@@ -136,14 +136,22 @@ export function generateLeads(query: string, count: number, countryCode?: string
   const leads: Lead[] = []
 
   const c = (countryCode || '').toUpperCase()
+  const isAE = c === 'AE' || /dubai|emirados|uae|abu dhabi|sharjah/i.test(query)
   const isJP = c === 'JP' || /japan|japão|tokyo|osaka|kyoto|yokohama|shibuya/i.test(query)
   const isUS = c === 'US' || /miami|new york|orlando|florida|california|texas|usa|eua|fl|ca|ny|tx/i.test(query)
   const isAU = c === 'AU' || /sydney|melbourne|brisbane|australia|austrália|nsw|vic|qld/i.test(query)
   const isUK = c === 'GB' || c === 'UK' || /london|manchester|uk|united kingdom|england/i.test(query)
   const isES = c === 'ES' || /madrid|barcelona|valencia|espanha|spain/i.test(query)
+  const isIT = c === 'IT' || /italia|itália|italy|roma|milano/i.test(query)
+  const isDE = c === 'DE' || /alemanha|germany|berlin|munich/i.test(query)
+  const isFR = c === 'FR' || /franca|frança|france|paris|lyon/i.test(query)
+  const isCH = c === 'CH' || /suica|suíça|switzerland|zurich|geneva/i.test(query)
 
   const jpPrefixes = ['Sakura', 'Tokyo Craft', 'Komorebi', 'Fuji', 'Kyoto', 'Ginza', 'Shibuya', 'Hikari', 'Zenith', 'Asahi']
   const jpSuffixes = ['Studio', 'Clinic', 'Cafe & Bar', 'Dental', 'Salon', 'Kitchen', 'Design', 'Consulting']
+
+  const uaePrefixes = ['Emirates', 'Dubai Prime', 'Al Noor', 'Gulf Horizon', 'Crescent', 'Burj', 'Palm', 'Oasis', 'Falcon', 'Marina']
+  const uaeSuffixes = ['Dental Clinic', 'Luxury Spa', 'Business Solutions', 'Restaurant & Cafe', 'Auto Care', 'Wellness Center']
 
   for (let i = 0; i < count; i++) {
     let name = ''
@@ -151,6 +159,10 @@ export function generateLeads(query: string, count: number, countryCode?: string
       if (isJP) {
         const p = jpPrefixes[Math.floor(rand() * jpPrefixes.length)]
         const s = jpSuffixes[Math.floor(rand() * jpSuffixes.length)]
+        name = `${p} ${s}`
+      } else if (isAE) {
+        const p = uaePrefixes[Math.floor(rand() * uaePrefixes.length)]
+        const s = uaeSuffixes[Math.floor(rand() * uaeSuffixes.length)]
         name = `${p} ${s}`
       } else {
         const p = preset.prefixes[Math.floor(rand() * preset.prefixes.length)]
@@ -168,7 +180,11 @@ export function generateLeads(query: string, count: number, countryCode?: string
     // Formatação de telefone conforme a região
     let phone = ''
     for (let tries = 0; tries < 25; tries++) {
-      if (isJP) {
+      if (isAE) {
+        const p1 = Math.floor(100 + rand() * 890)
+        const p2 = Math.floor(1000 + rand() * 8990)
+        phone = rand() > 0.5 ? `+971 4 ${p1} ${p2}` : `+971 50 ${p1} ${p2}`
+      } else if (isJP) {
         const p1 = Math.floor(1000 + rand() * 8990)
         const p2 = Math.floor(1000 + rand() * 8990)
         phone = `+81 3 ${p1}-${p2}`
@@ -189,6 +205,22 @@ export function generateLeads(query: string, count: number, countryCode?: string
         const p1 = Math.floor(100 + rand() * 890)
         const p2 = Math.floor(100 + rand() * 890)
         phone = `+34 91${p1} ${p2}`
+      } else if (isIT) {
+        const p1 = Math.floor(1000 + rand() * 8990)
+        const p2 = Math.floor(100 + rand() * 890)
+        phone = `+39 06 ${p1} ${p2}`
+      } else if (isDE) {
+        const p1 = Math.floor(1000 + rand() * 8990)
+        const p2 = Math.floor(100 + rand() * 890)
+        phone = `+49 30 ${p1} ${p2}`
+      } else if (isFR) {
+        const p1 = Math.floor(10 + rand() * 89)
+        const p2 = Math.floor(10 + rand() * 89)
+        phone = `+33 1 ${p1} ${p2} 40 50`
+      } else if (isCH) {
+        const p1 = Math.floor(100 + rand() * 890)
+        const p2 = Math.floor(10 + rand() * 89)
+        phone = `+41 44 ${p1} ${p2} 70`
       } else {
         const p1 = Math.floor(8100 + rand() * 1890)
         const p2 = Math.floor(1000 + rand() * 8990)
@@ -200,17 +232,27 @@ export function generateLeads(query: string, count: number, countryCode?: string
 
     const closeHour = 18 + Math.floor(rand() * 4)
 
-    const address = isJP
-      ? `${Math.floor(1 + rand() * 5)}-chome, Shibuya, Tokyo 150-0002, Japan`
-      : isUS
-        ? `${Math.floor(100 + rand() * 8900)} Biscayne Blvd, ${city}, FL, Estados Unidos`
-        : isAU
-          ? `${Math.floor(10 + rand() * 890)} George St, ${city} NSW, Austrália`
-          : isUK
-            ? `${Math.floor(10 + rand() * 490)} Oxford St, ${city}, United Kingdom`
-            : isES
-              ? `Calle Gran Vía, ${Math.floor(10 + rand() * 80)}, 28013 Madrid, España`
-              : `${STREETS[Math.floor(rand() * STREETS.length)]}, ${Math.floor(10 + rand() * 1900)} — ${city}`
+    const address = isAE
+      ? `Sheikh Zayed Road, Trade Centre, Dubai, Emirados Árabes Unidos`
+      : isJP
+        ? `${Math.floor(1 + rand() * 5)}-chome, Shibuya, Tokyo 150-0002, Japan`
+        : isUS
+          ? `${Math.floor(100 + rand() * 8900)} Biscayne Blvd, ${city}, FL, Estados Unidos`
+          : isAU
+            ? `${Math.floor(10 + rand() * 890)} George St, ${city} NSW, Austrália`
+            : isUK
+              ? `${Math.floor(10 + rand() * 490)} Oxford St, ${city}, United Kingdom`
+              : isES
+                ? `Calle Gran Vía, ${Math.floor(10 + rand() * 80)}, 28013 Madrid, España`
+                : isIT
+                  ? `Via del Corso, ${Math.floor(10 + rand() * 80)}, 00186 Roma, Italia`
+                  : isDE
+                    ? `Friedrichstraße ${Math.floor(10 + rand() * 80)}, 10117 Berlin, Deutschland`
+                    : isFR
+                      ? `Avenue des Champs-Élysées, ${Math.floor(10 + rand() * 80)}, 75008 Paris, France`
+                      : isCH
+                        ? `Bahnhofstrasse ${Math.floor(10 + rand() * 80)}, 8001 Zürich, Switzerland`
+                        : `${STREETS[Math.floor(rand() * STREETS.length)]}, ${Math.floor(10 + rand() * 1900)} — ${city}`
 
     leads.push({
       id: `${handle}-${i}`,

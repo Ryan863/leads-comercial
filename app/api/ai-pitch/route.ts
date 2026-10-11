@@ -34,21 +34,24 @@ export async function POST(req: Request) {
 
         const targetLang = (settings?.language && settings.language !== 'auto')
           ? settings.language
-          : (lead.address?.toLowerCase().includes('japan') || /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/i.test(lead.address + lead.name))
-            ? 'ja'
-            : (lead.address?.toLowerCase().match(/usa|united states|australia|uk|england|canada|london|sydney|miami|new york|california/i))
-              ? 'en'
-              : (lead.address?.toLowerCase().match(/spain|espanha|españa|mexico|argentina|colombia|madrid|barcelona/i))
-                ? 'es'
-                : (lead.address?.toLowerCase().match(/italy|itália|italia|roma|milano/i))
-                  ? 'it'
-                  : (lead.address?.toLowerCase().match(/germany|alemanha|berlin|munich/i))
-                    ? 'de'
-                    : (lead.address?.toLowerCase().match(/france|frança|paris/i))
-                      ? 'fr'
-                      : 'pt'
+          : (/[\u0600-\u06ff]/.test((lead.address || '') + (lead.name || '')))
+            ? 'ar'
+            : (lead.address?.toLowerCase().includes('japan') || /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/i.test((lead.address || '') + (lead.name || '')))
+              ? 'ja'
+              : (lead.address?.toLowerCase().match(/usa|united states|australia|uk|england|canada|dubai|emirados|uae|london|sydney|miami|new york|california|dublin/i))
+                ? 'en'
+                : (lead.address?.toLowerCase().match(/spain|espanha|españa|mexico|argentina|colombia|madrid|barcelona/i))
+                  ? 'es'
+                  : (lead.address?.toLowerCase().match(/italy|itália|italia|roma|milano/i))
+                    ? 'it'
+                    : (lead.address?.toLowerCase().match(/germany|alemanha|austria|áustria|berlin|munich|vienna/i))
+                      ? 'de'
+                      : (lead.address?.toLowerCase().match(/france|frança|paris|geneva/i))
+                        ? 'fr'
+                        : 'pt'
 
         const languageInstructions: Record<string, string> = {
+          ar: 'MANDATORY LANGUAGE: Write the entire message strictly in modern standard ARABIC (العربية), polite, respectful, and suitable for commercial WhatsApp outreach in UAE/Dubai.',
           ja: 'IDIOMA E TONALIDADE OBRIGATÓRIOS: Escreva a mensagem INTEIRAMENTE em JAPONÊS (日本語) com Keigo polido empresarial (丁寧語/尊敬語). Dirija-se ao lead com "様" (ex: [Nome]様、初めまして。突然のご連絡失礼いたします。). Retorne todo o conteúdo 100% em japonês nativo sem misturar português.',
           en: 'MANDATORY LANGUAGE: Write the entire message strictly in ENGLISH. Natural, professional, warm outreach tone suitable for US/UK/Australia businesses.',
           es: 'IDIOMA OBLIGATORIO: Escribe todo el mensaje estrictamente en ESPAÑOL. Tono profesional, cálido y enfocado en negocios hispanohablantes.',
