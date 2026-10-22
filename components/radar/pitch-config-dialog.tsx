@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Check, Globe, Key, MapPin, Sparkles, User, X } from 'lucide-react'
+import { Check, Globe, Key, Loader2, MapPin, Sparkles, User, X } from 'lucide-react'
 import {
   DEFAULT_PITCH_SETTINGS,
   getStoredPitchSettings,
@@ -21,15 +21,74 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const [settings, setSettings] = useState<PitchSettings>(DEFAULT_PITCH_SETTINGS)
   const [savedFeedback, setSavedFeedback] = useState(false)
+  const [testingKey, setTestingKey] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [serverHasKey, setServerHasKey] = useState(false)
 
   useEffect(() => {
     if (open) {
       setSettings(getStoredPitchSettings())
+      setTestResult(null)
       dialogRef.current?.showModal()
+
+      fetch('/api/ai-pitch')
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.hasServerKey) setServerHasKey(true)
+        })
+        .catch(() => {})
     } else {
       dialogRef.current?.close()
     }
   }, [open])
+
+  async function handleTestKey() {
+    const keyToTest = settings.geminiApiKey?.trim()
+    if (!keyToTest && !serverHasKey) {
+      setTestResult({ ok: false, msg: 'Cole sua chave do Gemini antes de testar.' })
+      return
+    }
+
+    setTestingKey(true)
+    setTestResult(null)
+
+    try {
+      const sampleLead = {
+        name: 'Barbearia Exemplo',
+        category: 'Barbearia',
+        phone: '49999999999',
+        whatsapp: true,
+        address: 'Rua das Flores, 100 - Videira - SC',
+        presence: 'none' as const,
+      }
+
+      const res = await fetch('/api/ai-pitch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lead: sampleLead,
+          settings: { ...settings, geminiApiKey: keyToTest },
+        }),
+      })
+
+      const data = await res.json()
+      if (res.ok && data.isAi) {
+        setTestResult({
+          ok: true,
+          msg: `Chave conectada com sucesso! Respondeu via Gemini (${data.model || 'Flash'}).`,
+        })
+      } else {
+        setTestResult({
+          ok: false,
+          msg: data.error || 'A API não retornou resposta via IA. Verifique a chave ou o limite do Google.',
+        })
+      }
+    } catch {
+      setTestResult({ ok: false, msg: 'Erro de rede ao conectar à API do Gemini.' })
+    } finally {
+      setTestingKey(false)
+    }
+  }
 
   function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -58,7 +117,7 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
             <div>
               <h2 className="text-lg font-bold leading-none">Automação de Mensagens</h2>
               <p className="mt-1 text-xs text-muted-foreground">
-                Personalize quem envia a mensagem e as preferências do gerador
+                Personalize remetente, nicho e integração com Gemini em tempo real
               </p>
             </div>
           </div>
@@ -109,7 +168,7 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
 
           <div>
             <label htmlFor="cfg-role" className="mb-1.5 block text-xs font-semibold text-muted-foreground">
-              Apresentação / Atuação
+              Como você se descreve brevemente:
             </label>
             <input
               id="cfg-role"
@@ -119,43 +178,13 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
               placeholder="Ex: crio sites limpos e práticos"
               className="h-10 w-full rounded-lg border border-input bg-background/70 px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Aparece no início da mensagem: &quot;Sou o {settings.senderName || 'Ryan'}, moro aqui em {settings.senderCity || 'Videira'} e {settings.senderRole}...&quot;
-            </p>
           </div>
 
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">
-              Identidade / Assinatura da Mensagem
-            </label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {[
-                { id: 'auto' as const, label: 'Automático', desc: 'Alterna Rvll e Ryan conforme porte' },
-                { id: 'ryan' as const, label: 'Ryan', desc: 'Abordagem pessoal 1 a 1' },
-                { id: 'rvll' as const, label: 'Equipe Rvll', desc: 'Abordagem profissional de equipe' },
-                { id: 'dev' as const, label: 'Desenvolvedor', desc: 'Foco técnico especialista' },
-              ].map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setSettings({ ...settings, persona: p.id })}
-                  className={`flex flex-col items-start rounded-lg border p-2 text-left transition ${
-                    settings.persona === p.id
-                      ? 'border-primary bg-primary/10 text-primary font-semibold'
-                      : 'border-border bg-background/50 text-muted-foreground hover:bg-accent'
-                  }`}
-                >
-                  <span className="text-xs">{p.label}</span>
-                  <span className="text-[10px] opacity-75">{p.desc}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
+          {/* Idioma Padrão da Abordagem */}
           <div>
             <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
               <Globe className="size-3.5 text-primary" />
-              Idioma da Mensagem de Abordagem
+              Idioma Padrão das Abordagens:
             </label>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {SUPPORTED_LANGUAGES.map((l) => (
@@ -163,80 +192,118 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
                   key={l.code}
                   type="button"
                   onClick={() => setSettings({ ...settings, language: l.code })}
-                  className={`flex items-center gap-1.5 rounded-lg border p-2 text-left transition ${
+                  className={`flex items-center gap-1.5 rounded-lg border p-2 text-left text-xs transition ${
                     (settings.language || 'auto') === l.code
-                      ? 'border-primary bg-primary/10 text-primary font-semibold'
-                      : 'border-border bg-background/50 text-muted-foreground hover:bg-accent'
+                      ? 'border-primary bg-primary/10 font-bold text-primary shadow-sm'
+                      : 'border-border bg-background/40 text-muted-foreground hover:bg-accent hover:text-foreground'
                   }`}
                 >
                   <span className="text-base">{l.flag}</span>
-                  <span className="text-xs truncate">{l.label}</span>
+                  <span className="truncate">{l.label}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
-            <p className="font-semibold text-foreground">
-              📍 Regra de Localização Inteligente (Nacional & Global)
-            </p>
-            <p className="mt-1 leading-relaxed text-[11px]">
-              Se o lead for de <strong>{settings.senderCity || 'Videira'}</strong>, a mensagem menciona naturalmente que você mora/é daqui da cidade e cita a rua. Se a busca for em <strong>outra cidade ou em outro país (ex: EUA, Austrália)</strong>, o sistema <strong>NÃO fala onde você mora</strong>, adapta o idioma e foca no nicho do cliente sem constrangimento.
-            </p>
-          </div>
-
           <div>
-            <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">
-              Estilo / Tom Padrão
-            </label>
+            <span className="mb-1.5 block text-xs font-semibold text-muted-foreground">
+              Tom Padrão da Abordagem:
+            </span>
             <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'consultative' as PitchTone, label: 'Acolhedor (Saúde)', desc: 'Igual aos exemplos do Ryan' },
-                { id: 'preview' as PitchTone, label: 'Oferta de Prévia', desc: 'Foco em mostrar estrutura' },
-                { id: 'direct' as PitchTone, label: 'Direto & Sem Site', desc: 'Foco em oportunidade rápida' },
-              ].map((t) => (
+              {(
+                [
+                  { id: 'consultative' as PitchTone, title: 'Acolhedor', desc: 'Suave e focado em tirar dúvidas' },
+                  { id: 'preview' as PitchTone, title: 'Prévia', desc: 'Oferece modelo visual em 1 minuto' },
+                  { id: 'direct' as PitchTone, title: 'Direto', desc: 'Objetivo, rápido e sem rodeios' },
+                ] as const
+              ).map((t) => (
                 <button
                   key={t.id}
                   type="button"
                   onClick={() => setSettings({ ...settings, tone: t.id })}
-                  className={`flex flex-col items-start rounded-lg border p-2.5 text-left transition ${
+                  className={`rounded-lg border p-2.5 text-left transition ${
                     settings.tone === t.id
-                      ? 'border-primary bg-primary/10 text-primary font-semibold'
-                      : 'border-border bg-background/50 text-muted-foreground hover:bg-accent'
+                      ? 'border-primary bg-primary/10 text-foreground font-semibold shadow-sm'
+                      : 'border-border bg-background/40 text-muted-foreground hover:bg-accent hover:text-foreground'
                   }`}
                 >
-                  <span className="text-xs">{t.label}</span>
-                  <span className="text-[10px] opacity-75">{t.desc}</span>
+                  <p className="text-xs font-bold text-foreground">{t.title}</p>
+                  <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{t.desc}</p>
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-background/50 p-3.5">
+          {/* Seção Gemini API */}
+          <div className="rounded-xl border border-primary/30 bg-primary/[0.04] p-3.5">
             <div className="flex items-center justify-between">
-              <label htmlFor="cfg-key" className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+              <label htmlFor="cfg-key" className="flex items-center gap-1.5 text-xs font-bold text-foreground">
                 <Key className="size-3.5 text-yellow-400" />
-                Chave Gratuita Google Gemini (Opcional)
+                API do Google Gemini (Tempo Real)
               </label>
               <a
                 href="https://aistudio.google.com/app/apikey"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[11px] font-medium text-primary hover:underline"
+                className="text-[11px] font-semibold text-primary hover:underline"
               >
-                Gerar chave grátis →
+                Gerar chave gratuita →
               </a>
             </div>
-            <input
-              id="cfg-key"
-              type="password"
-              value={settings.geminiApiKey || ''}
-              onChange={(e) => setSettings({ ...settings, geminiApiKey: e.target.value })}
-              placeholder="Cole sua chave AIzaSy... (opcional)"
-              className="mt-2 h-9 w-full rounded-lg border border-input bg-card px-3 font-mono text-xs outline-none focus:border-primary"
-            />
+
+            {serverHasKey && !settings.geminiApiKey && (
+              <div className="mt-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] text-emerald-300">
+                ✨ Chave Gemini detectada nas variáveis de ambiente do sistema! Você já pode usá-la em tempo real.
+              </div>
+            )}
+
+            <div className="mt-2 flex gap-2">
+              <input
+                id="cfg-key"
+                type="password"
+                value={settings.geminiApiKey || ''}
+                onChange={(e) => setSettings({ ...settings, geminiApiKey: e.target.value })}
+                placeholder="Cole sua chave AIzaSy... (Google AI Studio)"
+                className="h-9 flex-1 rounded-lg border border-input bg-card px-3 font-mono text-xs outline-none focus:border-primary"
+              />
+              <button
+                type="button"
+                onClick={handleTestKey}
+                disabled={testingKey}
+                className="btn-press inline-flex items-center gap-1.5 rounded-lg border border-primary/50 bg-primary/15 px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-primary/25 disabled:opacity-60"
+              >
+                {testingKey ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                {testingKey ? 'Testando...' : 'Testar'}
+              </button>
+            </div>
+
+            {testResult && (
+              <div
+                className={`mt-2 rounded-lg border p-2 text-xs ${
+                  testResult.ok
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 font-medium'
+                    : 'border-red-500/40 bg-red-500/10 text-red-300'
+                }`}
+              >
+                {testResult.msg}
+              </div>
+            )}
+
+            <div className="mt-2.5 flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="cfg-autogemini"
+                checked={settings.autoGemini !== false}
+                onChange={(e) => setSettings({ ...settings, autoGemini: e.target.checked })}
+                className="size-4 rounded border-input text-primary focus:ring-primary"
+              />
+              <label htmlFor="cfg-autogemini" className="text-xs font-medium text-foreground cursor-pointer">
+                Gerar abordagem com Gemini em tempo real automaticamente ao abrir cada lead
+              </label>
+            </div>
+
             <p className="mt-1.5 text-[11px] text-muted-foreground">
-              💡 <strong>Não tem chave?</strong> Sem problemas! O motor nativo já vem programado com 100% dos padrões exatos do Ryan, com hiperlocalidade e adaptação de nicho totalmente gratuita e sem limite.
+              💡 <strong>Dica:</strong> Com a chave ativa, cada mensagem é adaptada 100% ao ramo do estabelecimento em tempo real, sem jamais soar como spam, e com fallback nativo instantâneo.
             </p>
           </div>
 

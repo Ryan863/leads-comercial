@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Check,
   Copy,
   Dices,
   ExternalLink,
   Globe,
+  Key,
   Loader2,
   Mail,
   MapPin,
@@ -30,9 +31,11 @@ function InstagramIcon({ className = 'size-3' }: { className?: string }) {
     </svg>
   )
 }
+
 import type { Lead } from '@/lib/leads'
 import {
   detectLeadLanguage,
+  extractSpecialtyInfo,
   generatePitch,
   getStoredPitchSettings,
   isLeadInSameCity,
@@ -53,6 +56,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null)
   const [copied, setCopied] = useState(false)
   const [message, setMessage] = useState('')
+  const [localFallback, setLocalFallback] = useState('')
   const [variationIndex, setVariationIndex] = useState(0)
   const [selectedTone, setSelectedTone] = useState<PitchTone>('consultative')
   const [selectedPersona, setSelectedPersona] = useState<SenderPersona>('auto')
@@ -62,8 +66,57 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
   const [customPrompt, setCustomPrompt] = useState('')
   const [showAiInput, setShowAiInput] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
+  const [serverHasKey, setServerHasKey] = useState(false)
 
-  // Quando o lead muda ou o modal abre, gera a mensagem inicial adaptada
+  // Verifica se há chave Gemini no servidor
+  useEffect(() => {
+    fetch('/api/ai-pitch')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.hasServerKey) setServerHasKey(true)
+      })
+      .catch(() => {})
+  }, [])
+
+  // Função central para chamada do Gemini em tempo real
+  const fetchGeminiPitch = useCallback(async (
+    targetLead: Lead,
+    settings: PitchSettings,
+    lang: PitchLanguage,
+    persona: SenderPersona,
+    tone: PitchTone,
+    varIdx: number,
+    customInst?: string,
+  ) => {
+    setLoadingAi(true)
+    try {
+      const res = await fetch('/api/ai-pitch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lead: targetLead,
+          settings: { ...settings, persona, tone, language: lang },
+          customInstructions: customInst,
+          variationIndex: varIdx,
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        if (data.pitch) {
+          setMessage(data.pitch)
+          setIsAiGenerated(Boolean(data.isAi))
+          setShowAiInput(false)
+        }
+      }
+    } catch (err) {
+      console.warn('Erro na chamada Gemini em tempo real, mantendo motor nativo:', err)
+    } finally {
+      setLoadingAi(false)
+    }
+  }, [])
+
+  // Quando o lead muda ou o modal abre, gera a mensagem inicial adaptada e dispara IA se disponível
   useEffect(() => {
     if (lead) {
       const settings = getStoredPitchSettings()
@@ -73,6 +126,8 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
       setSelectedLanguage(initialLang)
       setVariationIndex(0)
       setIsAiGenerated(false)
+
+      // 1. Gera versão determinística ultra-adaptada por nicho imediatamente (sem delay)
       const initialText = generatePitch(
         lead,
         {
@@ -84,8 +139,15 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
         0,
       )
       setMessage(initialText)
+      setLocalFallback(initialText)
+
+      // 2. Se temos chave Gemini configurada (no cliente ou servidor) e autoGemini ativo, dispara em tempo real
+      const hasKey = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
+      if (hasKey && settings.autoGemini !== false) {
+        fetchGeminiPitch(lead, settings, initialLang, settings.persona || 'auto', settings.tone || 'consultative', 0)
+      }
     }
-  }, [lead])
+  }, [lead, serverHasKey, fetchGeminiPitch])
 
   useEffect(() => {
     const dialog = ref.current
@@ -103,8 +165,15 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
       { ...settings, persona, tone: selectedTone, language: selectedLanguage },
       variationIndex,
     )
-    setMessage(nextText)
-    setIsAiGenerated(false)
+    setLocalFallback(nextText)
+
+    const hasKey = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
+    if (hasKey && settings.autoGemini !== false) {
+      fetchGeminiPitch(lead, settings, selectedLanguage, persona, selectedTone, variationIndex)
+    } else {
+      setMessage(nextText)
+      setIsAiGenerated(false)
+    }
   }
 
   function handleToneChange(tone: PitchTone) {
@@ -116,8 +185,15 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
       { ...settings, persona: selectedPersona, tone, language: selectedLanguage },
       variationIndex,
     )
-    setMessage(nextText)
-    setIsAiGenerated(false)
+    setLocalFallback(nextText)
+
+    const hasKey = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
+    if (hasKey && settings.autoGemini !== false) {
+      fetchGeminiPitch(lead, settings, selectedLanguage, selectedPersona, tone, variationIndex)
+    } else {
+      setMessage(nextText)
+      setIsAiGenerated(false)
+    }
   }
 
   function handleLanguageChange(lang: PitchLanguage) {
@@ -129,8 +205,15 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
       { ...settings, persona: selectedPersona, tone: selectedTone, language: lang },
       variationIndex,
     )
-    setMessage(nextText)
-    setIsAiGenerated(false)
+    setLocalFallback(nextText)
+
+    const hasKey = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
+    if (hasKey && settings.autoGemini !== false) {
+      fetchGeminiPitch(lead, settings, lang, selectedPersona, selectedTone, variationIndex)
+    } else {
+      setMessage(nextText)
+      setIsAiGenerated(false)
+    }
   }
 
   function handleNextVariation() {
@@ -143,39 +226,29 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
       { ...settings, persona: selectedPersona, tone: selectedTone, language: selectedLanguage },
       nextIdx,
     )
-    setMessage(nextText)
-    setIsAiGenerated(false)
+    setLocalFallback(nextText)
+
+    const hasKey = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
+    if (hasKey && isAiGenerated) {
+      fetchGeminiPitch(lead, settings, selectedLanguage, selectedPersona, selectedTone, nextIdx)
+    } else {
+      setMessage(nextText)
+      setIsAiGenerated(false)
+    }
   }
 
   async function handleAiRefine() {
     if (!lead) return
-    setLoadingAi(true)
-    try {
-      const settings = getStoredPitchSettings()
-      const res = await fetch('/api/ai-pitch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lead,
-          settings: { ...settings, persona: selectedPersona, tone: selectedTone, language: selectedLanguage },
-          customInstructions: customPrompt.trim() || undefined,
-          variationIndex,
-        }),
-      })
-
-      if (res.ok) {
-        const data = await res.json()
-        if (data.pitch) {
-          setMessage(data.pitch)
-          setIsAiGenerated(data.isAi ?? true)
-          setShowAiInput(false)
-        }
-      }
-    } catch (err) {
-      console.warn('Erro ao chamar IA, mantendo gerador nativo:', err)
-    } finally {
-      setLoadingAi(false)
-    }
+    const settings = getStoredPitchSettings()
+    fetchGeminiPitch(
+      lead,
+      settings,
+      selectedLanguage,
+      selectedPersona,
+      selectedTone,
+      variationIndex,
+      customPrompt.trim() || undefined,
+    )
   }
 
   const rawDigits = lead?.phone?.replace(/\D/g, '') || ''
@@ -193,6 +266,8 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
   const instagramUrl = lead?.instagram || (lead?.website && /instagram\.com/i.test(lead.website) ? lead.website : (lead?.presence === 'social' && lead.website ? lead.website : null))
   const hasInstagram = Boolean(instagramUrl)
   const googleSearchUrl = lead ? `https://www.google.com/search?q=${encodeURIComponent(`${lead.name} ${lead.address} contato telefone whatsapp instagram`)}` : ''
+  const specialty = lead ? extractSpecialtyInfo(lead) : null
+  const hasKey = Boolean(storedSettings?.geminiApiKey?.trim() || serverHasKey)
 
   return (
     <>
@@ -209,8 +284,8 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
               <div className="min-w-0 pr-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="truncate text-lg font-bold text-foreground">{lead.name}</h2>
-                  <span className="rounded-md border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
-                    {lead.category}
+                  <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                    {specialty?.specialtyLabel || lead.category}
                   </span>
                 </div>
                 <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -223,7 +298,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                 <button
                   type="button"
                   onClick={() => setConfigOpen(true)}
-                  title="Configurar remetente e IA"
+                  title="Configurar remetente e IA Gemini"
                   className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
                 >
                   <Settings className="size-4" />
@@ -301,36 +376,55 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                     </span>
                     <div>
                       <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
-                        Mensagem de Abordagem Adaptada
+                        Abordagem Adaptada para {specialty?.specialtyLabel || 'Negócios Locais'}
                       </h3>
                       <p className="text-[11px] text-muted-foreground">
-                        Texto personalizado considerando presença digital e localização
+                        Texto 100% humanizado e direcionado às necessidades reais deste estabelecimento
                       </p>
                     </div>
                   </div>
 
-                  {/* Badges de contexto ativo */}
+                  {/* Badges de contexto ativo e status da IA */}
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {isLocal ? (
-                      <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
-                        <MapPin className="size-2.5" /> Gancho local ({baseCity})
+                    {loadingAi ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-bold text-amber-300 animate-pulse">
+                        <Loader2 className="size-3 animate-spin text-amber-400" />
+                        Gemini gerando em tempo real...
+                      </span>
+                    ) : isAiGenerated ? (
+                      <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                        <Sparkles className="size-2.5 text-emerald-400" /> Gemini IA Tempo Real
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-400">
-                        🌍 Fora de {baseCity} • Moradia omitida
+                      <span className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        ⚡ Motor Nativo por Nicho
                       </span>
                     )}
 
-                    {hasInstagram && (
-                      <span className="inline-flex items-center gap-1 rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-400">
-                        <InstagramIcon className="size-2.5" /> Foco: Instagram → WhatsApp
-                      </span>
+                    {!hasKey && (
+                      <button
+                        type="button"
+                        onClick={() => setConfigOpen(true)}
+                        className="inline-flex items-center gap-1 rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2 py-0.5 text-[10px] font-semibold text-yellow-300 transition hover:bg-yellow-500/20"
+                        title="Configurar chave do Google Gemini para respostas em tempo real"
+                      >
+                        <Key className="size-2.5 text-yellow-400" />
+                        Ativar Gemini
+                      </button>
                     )}
 
                     {isAiGenerated && (
-                      <span className="inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                        <Sparkles className="size-2.5" /> IA
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMessage(localFallback)
+                          setIsAiGenerated(false)
+                        }}
+                        title="Ver versão rápida determinística"
+                        className="text-[10px] text-muted-foreground transition hover:text-foreground underline decoration-dotted"
+                      >
+                        Ver versão nativa
+                      </button>
                     )}
                   </div>
                 </div>
@@ -388,7 +482,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                     <button
                       type="button"
                       onClick={handleNextVariation}
-                      title="Gera outra variação de abertura e fechamento"
+                      title="Gera outra variação de abordagem"
                       className="btn-press ml-1 inline-flex items-center gap-1 rounded-md border border-border bg-background/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition hover:border-primary/50 hover:text-foreground"
                     >
                       <Dices className="size-3 text-primary" />
@@ -401,7 +495,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                       className="btn-press inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary transition hover:bg-primary/20"
                     >
                       <Sparkles className="size-3" />
-                      {showAiInput ? 'Ocultar' : 'IA'}
+                      {showAiInput ? 'Ocultar' : 'IA Custom'}
                     </button>
                   </div>
                 </div>
@@ -410,7 +504,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                 <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-border/40 pt-2.5">
                   <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
                     <Globe className="size-3 text-primary" />
-                    Idioma do Pitch:
+                    Idioma:
                   </span>
                   {SUPPORTED_LANGUAGES.map((l) => (
                     <button
@@ -433,14 +527,14 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                 {showAiInput && (
                   <div className="mt-3 flex flex-col gap-2 rounded-xl border border-primary/30 bg-background/80 p-3">
                     <label className="text-[11px] font-medium text-muted-foreground">
-                      Instrução opcional para o agente de IA:
+                      Instrução opcional para o Gemini refinar esta mensagem:
                     </label>
                     <div className="flex gap-2">
                       <input
                         type="text"
                         value={customPrompt}
                         onChange={(e) => setCustomPrompt(e.target.value)}
-                        placeholder="Ex: Foque no agendamento aos sábados ou destaque fotos de tratamentos"
+                        placeholder="Ex: Foque no agendamento aos sábados ou mencione um procedimento específico"
                         className="h-8 flex-1 rounded-md border border-input bg-card px-2.5 text-xs outline-none focus:border-primary"
                         onKeyDown={(e) => e.key === 'Enter' && handleAiRefine()}
                       />
@@ -451,7 +545,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                         className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
                       >
                         {loadingAi ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-                        {loadingAi ? 'Gerando...' : 'Aplicar'}
+                        {loadingAi ? 'Gerando...' : 'Gerar com Gemini'}
                       </button>
                     </div>
                   </div>
@@ -467,7 +561,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                     className="w-full resize-y rounded-xl border border-border bg-background p-3.5 font-sans text-xs leading-relaxed text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
                   />
                   <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
-                    <span>💡 O texto já está pronto e adaptado. Você pode editar qualquer palavra antes de enviar.</span>
+                    <span>💡 Mensagem 100% adaptada ao ramo. Você pode editar qualquer palavra antes de enviar.</span>
                     <span>{message.length} caracteres</span>
                   </div>
                 </div>
@@ -572,7 +666,15 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
         onSaved={() => {
           if (lead) {
             const settings = getStoredPitchSettings()
-            setMessage(generatePitch(lead, settings, variationIndex))
+            const initialLang = (settings.language && settings.language !== 'auto') ? settings.language : 'auto'
+            const nextText = generatePitch(lead, settings, variationIndex)
+            setMessage(nextText)
+            setLocalFallback(nextText)
+
+            const hasK = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
+            if (hasK && settings.autoGemini !== false) {
+              fetchGeminiPitch(lead, settings, initialLang, selectedPersona, selectedTone, variationIndex)
+            }
           }
         }}
       />

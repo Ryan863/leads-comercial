@@ -17,7 +17,16 @@ export const SUPPORTED_LANGUAGES = [
 ] as const
 
 export function detectLeadLanguage(address?: string, name?: string): PitchLanguage {
+  const addrClean = (address || '').toLowerCase()
   const text = `${address || ''} ${name || ''}`.toLowerCase()
+
+  // Se for explicitamente Brasil (estados brasileiros ou menção a Brasil), é SEMPRE português
+  if (
+    /\b(?:sc|sp|pr|rs|mg|rj|ba|ce|pe|df|go|es|mt|ms|am|pa|rn|pb|al|se|ro|ac|ap|rr|to)\b/i.test(addrClean) ||
+    /brasil|brazil|florian[oó]polis|joinville|blumenau|curitiba|s[aã]o paulo|porto alegre|videira|joa[cç]aba|chapec[oó]/i.test(text)
+  ) {
+    return 'pt'
+  }
 
   // 1. Árabe explícito
   if (/[\u0600-\u06ff]/.test(text)) {
@@ -43,8 +52,8 @@ export function detectLeadLanguage(address?: string, name?: string): PitchLangua
   if (/france|frança|paris|lyon|marseille|bordeaux|toulouse|geneva|genebra|brussels|bruxelas/i.test(text)) {
     return 'fr'
   }
-  // 7. Países de língua inglesa (EUA, Dubai/UAE comercial, Austrália, UK, Canadá, Irlanda, Holanda negócios)
-  if (/dubai|emirados|uae|abu dhabi|sharjah|usa|united states|estados unidos|australia|austrália|uk|united kingdom|reino unido|england|canada|canadá|ireland|irlanda|amsterdam|netherlands|london|sydney|melbourne|brisbane|miami|new york|orlando|florida|california|texas|los angeles|chicago|toronto|vancouver|dublin|nsw|vic|qld|\bfl\b|\bca\b|\bny\b|\btx\b/i.test(text)) {
+  // 7. Países de língua inglesa (com word boundary estrito nas siglas de províncias para evitar colidir com "pélvica", etc.)
+  if (/dubai|emirados|uae|abu dhabi|sharjah|usa|united states|estados unidos|australia|austrália|uk|united kingdom|reino unido|england|canada|canadá|ireland|irlanda|amsterdam|netherlands|london|sydney|melbourne|brisbane|miami|new york|orlando|florida|california|texas|los angeles|chicago|toronto|vancouver|dublin|\bnsw\b|\bvic\b|\bqld\b|\bfl\b|\bca\b|\bny\b|\btx\b/i.test(text)) {
     return 'en'
   }
   // Padrão Brasil / Portugal
@@ -57,6 +66,7 @@ export type PitchSettings = {
   senderRole: string
   persona: SenderPersona
   geminiApiKey?: string
+  autoGemini?: boolean
   tone: PitchTone
   language?: PitchLanguage
 }
@@ -67,6 +77,7 @@ export const DEFAULT_PITCH_SETTINGS: PitchSettings = {
   senderRole: 'crio sites limpos e práticos',
   persona: 'auto',
   geminiApiKey: '',
+  autoGemini: true,
   tone: 'consultative',
   language: 'auto',
 }
@@ -117,13 +128,11 @@ export function isLeadInSameCity(address: string, senderCity = 'Videira'): boole
  */
 export function isInternationalLead(address?: string, name?: string): boolean {
   const norm = `${address || ''} ${name || ''}`.toLowerCase()
-  const internationalKeywords = [
-    'usa', 'united states', 'estados unidos', 'australia', 'austrália', 'uk', 'united kingdom',
-    'reino unido', 'england', 'canada', 'canadá', 'london', 'sydney', 'melbourne', 'brisbane',
-    'miami', 'new york', 'orlando', 'florida', 'california', 'texas', 'los angeles', 'chicago',
-    'toronto', 'vancouver', 'nsw', 'vic', 'qld', 'fl 3', 'ca 9', 'ny 1', 'tx 7'
-  ]
-  return internationalKeywords.some((w) => norm.includes(w))
+  if (/\b(?:sc|sp|pr|rs|mg|rj|ba|ce|pe|df|go|es|mt|ms|am|pa|rn|pb|al|se|ro|ac|ap|rr|to)\b/i.test(address || '') || /brasil|brazil/i.test(norm)) {
+    return false
+  }
+  const internationalRegex = /\b(?:usa|united states|estados unidos|australia|austrália|uk|united kingdom|reino unido|england|canada|canadá|london|sydney|melbourne|brisbane|miami|new york|orlando|florida|california|texas|los angeles|chicago|toronto|vancouver|nsw|vic|qld|fl|ca|ny|tx)\b/i
+  return internationalRegex.test(norm)
 }
 
 /**
@@ -138,10 +147,15 @@ export function extractCityFromAddress(address: string): string | null {
   return null
 }
 
+function capitalize(text: string): string {
+  if (!text) return ''
+  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase()
+}
+
 /**
  * Analisa o nome do lead para extrair um destinatário humanizado:
- * - Pessoa física: "Marisangela", "Jayne", "Camila"
- * - Clínica/Empresa: "equipe do Una Vita", "equipe da Bella Napoli"
+ * - Pessoa física: "Marisangela", "Dra. Letícia", "Camila"
+ * - Clínica/Empresa: "equipe do Una Vita", "equipe da Gênesis Estética Automotiva"
  */
 export function extractRecipient(name: string): { type: 'person' | 'business'; display: string } {
   const clean = name.trim()
@@ -157,7 +171,8 @@ export function extractRecipient(name: string): { type: 'person' | 'business'; d
     /^(?:dra?\.?|doutor(?:a)?|fisioterapeuta|nutricionista|psicólog(?:a|o))\s+([A-Za-zÀ-ú]+)/i,
   )
   if (titleMatch && titleMatch[1]) {
-    return { type: 'person', display: capitalize(titleMatch[1]) }
+    const isDr = /^dr/i.test(withoutSuffixes)
+    return { type: 'person', display: isDr ? `Dra. ${capitalize(titleMatch[1])}` : capitalize(titleMatch[1]) }
   }
 
   const businessKeywords = [
@@ -166,6 +181,8 @@ export function extractRecipient(name: string): { type: 'person' | 'business'; d
     'studio', 'estúdio', 'auto', 'mecânica', 'mecanica', 'oficina', 'garage', 'detailing',
     'imobiliária', 'imobiliaria', 'imóveis', 'imoveis', 'farmácia', 'farmacia', 'loja',
     'laboratório', 'laboratorio', 'instituto', 'escola', 'academia', 'salão', 'salao', 'barbearia',
+    'vidraçaria', 'refrigeração', 'refrigeracao', 'climatização', 'climatizacao', 'pet', 'vet',
+    'estética automotiva', 'estetica automotiva',
   ]
 
   const lower = withoutSuffixes.toLowerCase()
@@ -188,13 +205,14 @@ export function extractRecipient(name: string): { type: 'person' | 'business'; d
     return { type: 'business', display: `equipe do ${afterEspaco || businessName}` }
   }
 
-  const isFeminine = /^(clínica|pizzaria|hamburgueria|forneria|mecânica|imobiliária|oficina|barbearia|loja|escola|academia)\b/i.test(
+  // Feminino vs Masculino
+  const isFeminine = /^(clínica|pizzaria|hamburgueria|forneria|mecânica|imobiliária|oficina|barbearia|loja|escola|academia|vidraçaria|refrigeração|floricultura|ótica|estética|autoescola)\b/i.test(
     businessName,
   )
   const article = isFeminine ? 'da' : 'do'
 
   const shortName = businessName
-    .replace(/^(clínica|consultório|pizzaria|oficina|restaurante|studio)\s+(de\s+|da\s+|do\s+)?/i, '')
+    .replace(/^(clínica|consultório|pizzaria|oficina|restaurante|studio|barbearia|vidraçaria)\s+(de\s+|da\s+|do\s+)?/i, '')
     .trim()
 
   return { type: 'business', display: `equipe ${article} ${shortName || businessName}` }
@@ -254,78 +272,917 @@ export function extractLocationHook(address: string, isSameCity: boolean, leadCi
   return isSameCity ? 'aqui na cidade' : leadCity ? `em ${leadCity}` : 'da região'
 }
 
-/**
- * Identifica o nicho e especialidade do lead.
- */
-export function extractSpecialtyInfo(lead: Lead): {
+export type SpecialtyInfo = {
   isHealth: boolean
   isPelvicOrPhysio: boolean
   isDental: boolean
   isFood: boolean
   isAuto: boolean
   isRealEstate: boolean
+  isBarber: boolean
+  isBeautyOrSpa: boolean
+  isNailOrLash: boolean
+  isTattoo: boolean
+  isPilates: boolean
+  isGym: boolean
+  isPet: boolean
+  isGlazing: boolean
+  isFurniture: boolean
+  isHvac: boolean
+  isTechRepair: boolean
+  isLaw: boolean
+  isAccounting: boolean
+  isPhoto: boolean
+  isHospitality: boolean
+  nicheType: string
   specialtyLabel: string
   clientTerm: string
-} {
-  const combined = `${lead.name} ${lead.category}`.toLowerCase()
-
-  const isPelvic = combined.includes('pélvic') || combined.includes('pelvic')
-  const isPhysio = combined.includes('fisioter') || isPelvic
-  const isDental = combined.includes('odont') || combined.includes('dent') || combined.includes('sorriso')
-  const isHealth = isPhysio || isDental || /cl[ií]nic|m[eé]dic|sa[uú]de|psic[oó]l|terap|nutri/i.test(combined)
-  const isFood = /pizz|restaur|hamburg|lanch|lanche|forn|delivery|gastronom|sabor|comida/i.test(combined)
-  const isAuto = /mec[aâ]n|auto|oficina|est[eé]tica autom|lava|detail|garag|turbo/i.test(combined)
-  const isRealEstate = /imob|corret|im[oó]v/i.test(combined)
-
-  let specialtyLabel = 'serviços e atendimentos'
-  let clientTerm = 'cliente'
-
-  if (isPelvic) {
-    specialtyLabel = 'fisioterapia pélvica'
-    clientTerm = 'paciente'
-  } else if (isPhysio) {
-    specialtyLabel = 'fisioterapia e reabilitação'
-    clientTerm = 'paciente'
-  } else if (isDental) {
-    specialtyLabel = 'odontologia e estética bucal'
-    clientTerm = 'paciente'
-  } else if (isHealth) {
-    specialtyLabel = 'serviços de saúde e bem-estar'
-    clientTerm = 'paciente'
-  } else if (isFood) {
-    specialtyLabel = 'gastronomia e pedidos rápidos'
-    clientTerm = 'cliente'
-  } else if (isAuto) {
-    specialtyLabel = 'cuidados e serviços automotivos'
-    clientTerm = 'cliente'
-  } else if (isRealEstate) {
-    specialtyLabel = 'negócios imobiliários'
-    clientTerm = 'cliente'
-  }
-
-  return {
-    isHealth,
-    isPelvicOrPhysio: isPhysio,
-    isDental,
-    isFood,
-    isAuto,
-    isRealEstate,
-    specialtyLabel,
-    clientTerm,
-  }
-}
-
-function capitalize(text: string): string {
-  if (!text) return ''
-  return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase()
+  serviceTerm: string
+  actionTerm: string
 }
 
 /**
- * Gera a assinatura adaptada conforme persona escolhida:
- * - 'ryan': "Sou o Ryan..."
+ * Identifica com precisão o nicho e especialidade do lead.
+ * IMPORTANTE: Termos compostos e específicos têm prioridade máxima
+ * para evitar que palavras gerais (como "estética") colidam com subáreas ("estética automotiva").
+ */
+export function extractSpecialtyInfo(lead: Lead): SpecialtyInfo {
+  const combined = `${lead.name} ${lead.category || ''} ${lead.address || ''}`.toLowerCase()
+
+  // 1. ESTÉTICA AUTOMOTIVA, POLIMENTO, LAVAGEM & DETAILING
+  // Deve vir obrigatoriamente ANTES de estética facial/humana!
+  const isAutoDetail = /est[eé]tica\s*(?:automotiv|veicular|de ve[ií]culos)|detailer|detailing|polimento|vitrifica|cristaliza|lava\s*car|lavacar|lava\s*jato|lava[- ]r[aá]pido|lava[cç][aã]o|est[eé]tica\s+auto\b|estetica\s+automotiva|higieniza[cç][aã]o automotiva|martelinho\s*de\s*ouro|insulfilm/i.test(combined)
+  if (isAutoDetail) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: true,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'auto_detail',
+      specialtyLabel: 'serviços de estética automotiva e detalhamento',
+      clientTerm: 'cliente',
+      serviceTerm: 'polimento, higienização e estética veicular',
+      actionTerm: 'pedir orçamento',
+    }
+  }
+
+  // 2. PET SHOP, VETERINÁRIA, BANHO E TOSA
+  // Deve vir antes de clínicas e estética humana!
+  const isPet = /pet\s*shop|petshop|veterin[aá]r|banho\s*e\s*tosa|banho\s*&\s*tosa|est[eé]tica\s*(?:animal|canina|pet)|cl[ií]nica\s*vet|pet\s*care|hospital\s*veterin[aá]r/i.test(combined)
+  if (isPet) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: true,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'pet',
+      specialtyLabel: 'clínicas veterinárias e pet shops',
+      clientTerm: 'tutor',
+      serviceTerm: 'banho, tosa e consultas veterinárias',
+      actionTerm: 'agendar horário',
+    }
+  }
+
+  // 3. ODONTOLOGIA & DENTISTAS
+  // Deve vir antes de estética geral humana!
+  const isDental = /odont|dentist|sorriso|ortodont|implante\s*dent|clareamento\s*dent|pr[oó]tese\s*dent|invisalign|harmoniza[cç][aã]o\s*orofacial|est[eé]tica\s*dental|cirurgi[aã]o[- ]dentista/i.test(combined)
+  if (isDental) {
+    return {
+      isHealth: true,
+      isPelvicOrPhysio: false,
+      isDental: true,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'dental',
+      specialtyLabel: 'consultórios e clínicas odontológicas',
+      clientTerm: 'paciente',
+      serviceTerm: 'tratamentos odontológicos e reabilitação oral',
+      actionTerm: 'marcar avaliação',
+    }
+  }
+
+  // 4. FISIOTERAPIA PÉLVICA & SAÚDE DA MULHER
+  // Deve vir antes de fisioterapia geral!
+  const isPelvic = /p[eé]lvic|uroginecolog|sa[uú]de\s*da\s*mulher/i.test(combined)
+  if (isPelvic) {
+    return {
+      isHealth: true,
+      isPelvicOrPhysio: true,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'pelvic',
+      specialtyLabel: 'fisioterapia pélvica e saúde íntima',
+      clientTerm: 'paciente',
+      serviceTerm: 'tratamentos e reabilitação pélvica',
+      actionTerm: 'agendar avaliação',
+    }
+  }
+
+  // 5. FISIOTERAPIA GERAL, QUIROPRAXIA & OSTEOPATIA
+  const isPhysio = /fisioter|quiropra|osteopat|reabilita|coluna|traumato/i.test(combined)
+  if (isPhysio) {
+    return {
+      isHealth: true,
+      isPelvicOrPhysio: true,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'physio',
+      specialtyLabel: 'fisioterapia, quiropraxia e reabilitação física',
+      clientTerm: 'paciente',
+      serviceTerm: 'tratamentos e alívio de dores',
+      actionTerm: 'marcar avaliação',
+    }
+  }
+
+  // 6. AUTOESCOLA (Não confundir com mecânica / auto)
+  const isAutoSchool = /auto\s*escola|autoescola|cfc\s+|primeira\s*habilita[cç][aã]o/i.test(combined)
+  if (isAutoSchool) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'auto_school',
+      specialtyLabel: 'autoescolas e centros de formação de condutores',
+      clientTerm: 'aluno',
+      serviceTerm: 'aulas de direção e habilitação',
+      actionTerm: 'solicitar matrícula',
+    }
+  }
+
+  // 7. OFICINA MECÂNICA, AUTO CENTER & SERVIÇOS AUTOMOTIVOS
+  const isAutoMechanic = /mec[aâ]nic|auto\s*center|centro\s*automotivo|oficina\b|funilaria|auto\s*el[eé]trica|troca\s*de\s*[oó]leo|alinhamento|balanceamento|freios|inje[cç][aã]o|suspens[aã]o|borracharia|ret[ií]fica/i.test(combined)
+  if (isAutoMechanic) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: true,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'auto_mechanic',
+      specialtyLabel: 'oficinas mecânicas e manutenção automotiva',
+      clientTerm: 'cliente',
+      serviceTerm: 'manutenções e revisões preventivas',
+      actionTerm: 'solicitar orçamento',
+    }
+  }
+
+  // 8. BARBEARIA & BARBEIRO
+  const isBarber = /barbearia|barbeir|barber|corte\s*masculin|fade|degrad[eê]|navalha|corte\s*e\s*barba/i.test(combined)
+  if (isBarber) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: true,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'barber',
+      specialtyLabel: 'barbearias e cuidados masculinos',
+      clientTerm: 'cliente',
+      serviceTerm: 'cortes, barba e tratamentos',
+      actionTerm: 'agendar horário',
+    }
+  }
+
+  // 9. UNHAS, CÍLIOS & SOBRANCELHAS (Nails & Lash)
+  const isNailOrLash = /nail|manicure|pedicure|alongamento\s*de\s*unhas|fibra\s*de\s*vidro|lash|c[ií]lios|extens[aã]o\s*de\s*c[ií]lios|designer\s*de\s*sobrancelhas|micropigmenta|microblading|sobrancelha/i.test(combined)
+  if (isNailOrLash) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: true,
+      isNailOrLash: true,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'nails_lash',
+      specialtyLabel: 'studios de unhas, sobrancelhas e extensão de cílios',
+      clientTerm: 'cliente',
+      serviceTerm: 'procedimentos e manutenções',
+      actionTerm: 'agendar horário',
+    }
+  }
+
+  // 10. SALÃO DE BELEZA & CABELEIREIRO
+  const isHairSalon = /sal[aã]o\s*de\s*beleza|cabeleireir|hair|cabelo|mechas|escova|loiro|alisamento|mega\s*hair/i.test(combined)
+  if (isHairSalon) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: true,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'hair_salon',
+      specialtyLabel: 'salões de beleza e cuidados capilares',
+      clientTerm: 'cliente',
+      serviceTerm: 'procedimentos capilares e transformações',
+      actionTerm: 'agendar horário',
+    }
+  }
+
+  // 11. STUDIO DE PILATES
+  const isPilates = /pilates|studio\s*de\s*pilates|m[eé]todo\s*pilates/i.test(combined)
+  if (isPilates) {
+    return {
+      isHealth: true,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: true,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'pilates',
+      specialtyLabel: 'studios de Pilates e condicionamento físico',
+      clientTerm: 'aluno',
+      serviceTerm: 'aulas personalizadas e horários',
+      actionTerm: 'agendar aula experimental',
+    }
+  }
+
+  // 12. TATUAGEM & BODY PIERCING
+  const isTattoo = /tatuag|tattoo|piercing|piercer|tatuador/i.test(combined)
+  if (isTattoo) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: true,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'tattoo',
+      specialtyLabel: 'studios de tatuagem e body piercing',
+      clientTerm: 'cliente',
+      serviceTerm: 'artes, projetos autorais e piercings',
+      actionTerm: 'pedir orçamento',
+    }
+  }
+
+  // 13. FOTOGRAFIA & ENSAIOS
+  const isPhoto = /fot[oó]gra|fotografia|est[uú]dio\s*fotogr[aá]fico|ensaio\s*fotogr[aá]fico/i.test(combined)
+  if (isPhoto) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: true,
+      isHospitality: false,
+      nicheType: 'photo',
+      specialtyLabel: 'ensaios e estúdios de fotografia',
+      clientTerm: 'cliente',
+      serviceTerm: 'ensaios e coberturas visuais',
+      actionTerm: 'conferir portfólio e orçamento',
+    }
+  }
+
+  // 14. ESTÉTICA FACIAL, CORPORAL & BIOMÉDICA (Humana)
+  // Só aciona se NÃO for automotiva, pet ou dental!
+  const isAesthetics = /est[eé]tica|harmoniza|biom[eé]d|botox|preenchimento|limpeza\s*de\s*pele|esteta|spa\b|massoterapia|drenagem/i.test(combined)
+  if (isAesthetics) {
+    return {
+      isHealth: true,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: true,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'aesthetics',
+      specialtyLabel: 'clínicas e procedimentos de estética facial e corporal',
+      clientTerm: 'paciente',
+      serviceTerm: 'procedimentos e protocolos estéticos',
+      actionTerm: 'marcar avaliação',
+    }
+  }
+
+  // 15. GASTRONOMIA, RESTAURANTES, PIZZARIAS & LANCHONETES
+  const isFood = /pizz|restaur|hamburg|lanch|lanche|forn|delivery|gastronom|sabor|comida|sushi|caf[eé]|padaria|confeitaria|doceria|a[cç]ougue|pastel/i.test(combined)
+  if (isFood) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: true,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'food',
+      specialtyLabel: 'restaurantes, lanchonetes e gastronomia',
+      clientTerm: 'cliente',
+      serviceTerm: 'cardápio digital e pedidos',
+      actionTerm: 'fazer pedido',
+    }
+  }
+
+  // 16. VIDRAÇARIA & ESQUADRIAS
+  const isGlazing = /vidra[cç]|box\s*de\s*vidro|esquadria|vidro|temperado|espelho/i.test(combined)
+  if (isGlazing) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: true,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'glazing',
+      specialtyLabel: 'vidraçarias e esquadrias',
+      clientTerm: 'cliente',
+      serviceTerm: 'projetos e instalações em vidro',
+      actionTerm: 'pedir orçamento',
+    }
+  }
+
+  // 17. MÓVEIS PLANEJADOS & MARCENARIA
+  const isFurniture = /m[oó]veis\s*planej|marcenaria|m[oó]veis\s*sob\s*medida|marceneiro/i.test(combined)
+  if (isFurniture) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: true,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'furniture',
+      specialtyLabel: 'móveis planejados e marcenaria',
+      clientTerm: 'cliente',
+      serviceTerm: 'projetos sob medida e acabamentos',
+      actionTerm: 'solicitar projeto e orçamento',
+    }
+  }
+
+  // 18. CLIMATIZAÇÃO, REFRIGERAÇÃO & ENERGIA SOLAR
+  const isHvac = /climatiza|refrigera|ar[- ]condicionado|split|aquecedor|energia\s*solar/i.test(combined)
+  if (isHvac) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: true,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'hvac',
+      specialtyLabel: 'empresas de climatização e refrigeração',
+      clientTerm: 'cliente',
+      serviceTerm: 'instalações e manutenções técnicas',
+      actionTerm: 'pedir orçamento',
+    }
+  }
+
+  // 19. ASSISTÊNCIA TÉCNICA, CELULARES & INFORMÁTICA
+  const isTechRepair = /assist[eê]ncia\s*t[eé]cnica|conserto\s*de\s*celular|smartphones|inform[aá]tica|computador|notebook|reparo\s*de\s*placas/i.test(combined)
+  if (isTechRepair) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: true,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'tech_repair',
+      specialtyLabel: 'assistências técnicas e conserto de aparelhos',
+      clientTerm: 'cliente',
+      serviceTerm: 'diagnósticos e consertos rápidos',
+      actionTerm: 'solicitar orçamento',
+    }
+  }
+
+  // 20. IMOBILIÁRIA & CORRETORES
+  const isRealEstate = /imob|corret|im[oó]v/i.test(combined)
+  if (isRealEstate) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: true,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'real_estate',
+      specialtyLabel: 'imobiliárias e corretores de imóveis',
+      clientTerm: 'cliente',
+      serviceTerm: 'imóveis disponíveis e oportunidades',
+      actionTerm: 'conferir opções no WhatsApp',
+    }
+  }
+
+  // 21. ADVOCACIA & ESCRITÓRIOS JURÍDICOS
+  const isLaw = /advog|advocacia|jur[ií]dic|direito|escrit[oó]rio\s*de\s*advocacia/i.test(combined)
+  if (isLaw) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: true,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'law',
+      specialtyLabel: 'escritórios de advocacia e assessoria jurídica',
+      clientTerm: 'cliente',
+      serviceTerm: 'áreas de atuação e consultoria',
+      actionTerm: 'agendar atendimento',
+    }
+  }
+
+  // 22. CONTABILIDADE & GESTÃO FISCAL
+  const isAccounting = /cont[aá]bil|contabilidade|contador|assessoria\s*fiscal/i.test(combined)
+  if (isAccounting) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: true,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'accounting',
+      specialtyLabel: 'escritórios de contabilidade e gestão fiscal',
+      clientTerm: 'cliente',
+      serviceTerm: 'soluções contábeis e fiscais',
+      actionTerm: 'solicitar contato',
+    }
+  }
+
+  // 23. HOTELARIA, POUSADAS & TURISMO
+  const isHospitality = /pousada|hotel|hostel|chal[eé]|hospedagem|turismo/i.test(combined)
+  if (isHospitality) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: true,
+      nicheType: 'hospitality',
+      specialtyLabel: 'hotéis, pousadas e hospedagens',
+      clientTerm: 'hóspede',
+      serviceTerm: 'quartos, diárias e passeios',
+      actionTerm: 'consultar reservas no WhatsApp',
+    }
+  }
+
+  // 24. ACADEMIA, TREINAMENTO & MODALIDADES ESPORTIVAS
+  const isGym = /academia|crossfit|fitness|muscula|personal\s*trainer|artes\s*marciais|jiu[- ]jitsu|muay\s*thai|boxe|funcional|dan[cç]a/i.test(combined)
+  if (isGym) {
+    return {
+      isHealth: false,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: true,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'gym',
+      specialtyLabel: 'academias, treinos e modalidades esportivas',
+      clientTerm: 'aluno',
+      serviceTerm: 'modalidades e planos de treino',
+      actionTerm: 'agendar aula teste',
+    }
+  }
+
+  // 25. SAÚDE GERAL (Médicos, Clínicas Médicas, Psicologia, Nutrição)
+  const isHealth = /m[eé]dic|cl[ií]nic|sa[uú]de|psic[oó]l|nutri|terap|fonoaudi[oó]l|acupuntur/i.test(combined)
+  if (isHealth) {
+    return {
+      isHealth: true,
+      isPelvicOrPhysio: false,
+      isDental: false,
+      isFood: false,
+      isAuto: false,
+      isRealEstate: false,
+      isBarber: false,
+      isBeautyOrSpa: false,
+      isNailOrLash: false,
+      isTattoo: false,
+      isPilates: false,
+      isGym: false,
+      isPet: false,
+      isGlazing: false,
+      isFurniture: false,
+      isHvac: false,
+      isTechRepair: false,
+      isLaw: false,
+      isAccounting: false,
+      isPhoto: false,
+      isHospitality: false,
+      nicheType: 'health',
+      specialtyLabel: 'clínicas e atendimentos de saúde',
+      clientTerm: 'paciente',
+      serviceTerm: 'consultas e atendimentos',
+      actionTerm: 'marcar consulta',
+    }
+  }
+
+  // 26. FALLBACK DINÂMICO INTELIGENTE
+  // Nunca mais gera "empresas e atendimentos"!
+  const rawCat = (lead.category || '')
+    .replace(/^(loja de|serviço de|comércio de|comercio de|serviços de)\s+/i, '')
+    .trim()
+    .toLowerCase()
+  const customLabel = rawCat && rawCat.length >= 3 ? `estabelecimentos de ${rawCat}` : 'negócios e comércios locais'
+
+  return {
+    isHealth: false,
+    isPelvicOrPhysio: false,
+    isDental: false,
+    isFood: false,
+    isAuto: false,
+    isRealEstate: false,
+    isBarber: false,
+    isBeautyOrSpa: false,
+    isNailOrLash: false,
+    isTattoo: false,
+    isPilates: false,
+    isGym: false,
+    isPet: false,
+    isGlazing: false,
+    isFurniture: false,
+    isHvac: false,
+    isTechRepair: false,
+    isLaw: false,
+    isAccounting: false,
+    isPhoto: false,
+    isHospitality: false,
+    nicheType: 'custom',
+    specialtyLabel: customLabel,
+    clientTerm: 'cliente',
+    serviceTerm: 'serviços e produtos',
+    actionTerm: 'entrar em contato',
+  }
+}
+
+/**
+ * Gera a apresentação humana adaptada ao tipo exato de estabelecimento e persona:
+ * - 'ryan': "Meu nome é Ryan..."
  * - 'rvll': "Somos da equipe Rvll..."
  * - 'dev': "Sou desenvolvedor web..."
- * - 'auto': escolhe com base no contexto do lead (pessoa física vs clínica/empresa)
+ * - 'auto': escolhe com base no contexto do lead
  */
 export function buildPresentation(
   persona: SenderPersona,
@@ -337,10 +1194,8 @@ export function buildPresentation(
   isBusinessLead: boolean,
   variationIndex = 0,
 ): string {
-  // Resolve modo auto
   let activePersona = persona
   if (persona === 'auto') {
-    // Se for empresa/espaço, alterna entre Rvll e Ryan; se for profissional individual, prioriza contato pessoal
     if (isBusinessLead && variationIndex % 2 === 1) {
       activePersona = 'rvll'
     } else if (variationIndex % 3 === 2) {
@@ -354,25 +1209,25 @@ export function buildPresentation(
   if (isSameCity) {
     if (activePersona === 'rvll') {
       const rvllLocalVariants = [
-        `Somos da equipe Rvll, atuamos aqui em ${senderCity} criando sites institucionais limpos e focados em ${specialtyLabel}.`,
-        `Aqui é da equipe Rvll, trabalhamos com desenvolvimento de páginas modernas e práticas para ${isHealth ? 'profissionais e clínicas de saúde' : 'empresas locais'} da nossa cidade.`,
+        `Somos da equipe Rvll, atuamos aqui em ${senderCity} criando páginas modernas, leves e focadas em ${specialtyLabel}.`,
+        `Aqui é da equipe Rvll, desenvolvemos sites modernos e práticos com foco em agendamentos diretos no WhatsApp para ${specialtyLabel} aqui da cidade.`,
       ]
       return rvllLocalVariants[variationIndex % rvllLocalVariants.length]
     }
 
     if (activePersona === 'dev') {
       const devLocalVariants = [
-        `Sou desenvolvedor web aqui em ${senderCity} e crio sites limpos e rápidos para ${isHealth ? 'profissionais da saúde' : 'estabelecimentos'} da região.`,
-        `Trabalho com desenvolvimento de sites práticos aqui em ${senderCity}, com foco especial em ${specialtyLabel}.`,
+        `Sou desenvolvedor web aqui em ${senderCity} e crio páginas rápidas e limpas para ${specialtyLabel} da região.`,
+        `Trabalho com desenvolvimento de páginas práticas aqui em ${senderCity}, com foco especial em ${specialtyLabel}.`,
       ]
       return devLocalVariants[variationIndex % devLocalVariants.length]
     }
 
-    // Persona Ryan na mesma cidade (padrão original do Ryan)
+    // Persona Ryan na mesma cidade
     const ryanLocalVariants = [
-      `Meu nome é ${senderName}, moro aqui em ${senderCity} e crio sites limpos e práticos para ${isHealth ? 'profissionais da saúde' : 'empresas'} da cidade.`,
-      `Sou o ${senderName}, sou aqui de ${senderCity} e desenvolvo sites rápidos focados em ${specialtyLabel}.`,
-      `Meu nome é ${senderName}, sou de ${senderCity} e trabalho desenvolvendo sites institucionais para ${isHealth ? 'consultórios e atendimentos de saúde' : 'negócios locais'}.`,
+      `Meu nome é ${senderName}, moro aqui em ${senderCity} e crio páginas bem práticas e diretas para ${specialtyLabel} da nossa cidade.`,
+      `Sou o ${senderName}, sou aqui de ${senderCity} e desenvolvo sites rápidos focados em agendamentos no WhatsApp para ${specialtyLabel}.`,
+      `Meu nome é ${senderName}, sou de ${senderCity} e trabalho criando páginas limpas e objetivas para ${specialtyLabel}.`,
     ]
     return ryanLocalVariants[variationIndex % ryanLocalVariants.length]
   }
@@ -380,35 +1235,36 @@ export function buildPresentation(
   // 2. Caso NÃO SEJA DA CIDADE DELE (NÃO fala onde mora nem cita a própria cidade!)
   if (activePersona === 'rvll') {
     const rvllRemoteVariants = [
-      `Somos da equipe Rvll, trabalhamos desenvolvendo sites institucionais limpos e de alta conversão para ${isHealth ? 'consultórios e clínicas' : 'empresas e atendimentos'}.`,
-      `Aqui é da equipe Rvll. Atuamos criando páginas web rápidas e práticas com foco em agendamentos diretos no WhatsApp para ${specialtyLabel}.`,
+      `Somos da equipe Rvll, trabalhamos desenvolvendo páginas web rápidas e focadas em converter quem busca no Google em contatos no WhatsApp para ${specialtyLabel}.`,
+      `Aqui é da equipe Rvll. Atuamos criando páginas práticas com foco em agendamentos e orçamentos diretos no WhatsApp para ${specialtyLabel}.`,
     ]
     return rvllRemoteVariants[variationIndex % rvllRemoteVariants.length]
   }
 
   if (activePersona === 'dev') {
     const devRemoteVariants = [
-      `Sou desenvolvedor web focado na criação de sites limpos, modernos e de carregamento rápido para ${isHealth ? 'profissionais e consultórios de saúde' : 'negócios locais'}.`,
-      `Trabalho com desenvolvimento de páginas institucionais práticas e enxutas com foco em ${specialtyLabel}.`,
+      `Sou desenvolvedor web focado na criação de páginas limpas, modernas e de carregamento ultrarrápido para ${specialtyLabel}.`,
+      `Trabalho com desenvolvimento de páginas práticas e enxutas para ${specialtyLabel}, pensadas para quem navega pelo celular.`,
     ]
     return devRemoteVariants[variationIndex % devRemoteVariants.length]
   }
 
-  // Persona Ryan fora da cidade (NUNCA diz que mora na cidade do lead nem onde mora)
+  // Persona Ryan fora da cidade
   const ryanRemoteVariants = [
-    `Meu nome é ${senderName}, sou desenvolvedor web e crio sites limpos e práticos focados em ${isHealth ? 'consultórios e profissionais de saúde' : 'empresas de serviços'}.`,
-    `Sou o ${senderName}, trabalho com desenvolvimento de páginas rápidas e institucionais com foco em ${specialtyLabel}.`,
-    `Meu nome é ${senderName}, atuo desenvolvendo sites modernos focados em agendamentos diretos no WhatsApp para ${isHealth ? 'atendimentos de saúde' : 'empresas locais'}.`,
+    `Meu nome é ${senderName}, sou desenvolvedor web e crio páginas limpas e práticas focadas em ${specialtyLabel}.`,
+    `Sou o ${senderName}, trabalho com páginas rápidas focadas em transformar visitas no Google em agendamentos no WhatsApp para ${specialtyLabel}.`,
+    `Meu nome é ${senderName}, atuo desenvolvendo sites modernos focados em orçamentos e agendamentos diretos no WhatsApp para ${specialtyLabel}.`,
   ]
   return ryanRemoteVariants[variationIndex % ryanRemoteVariants.length]
 }
 
 /**
  * Gera a mensagem adaptada completa para o lead, considerando:
+ * - Tipo específico do estabelecimento (Barbearia, Estética Automotiva, Clínica Estética, Oficina, Dentista, Pet, etc.)
  * - Cidade do lead vs cidade base (não cita moradia se for de fora)
- * - Se tem Instagram (foca na necessidade de transformar seguidores e quem busca no Google em agendamentos no WhatsApp)
- * - Se não tem site (foca em autoridade, tirar dúvidas pré-atendimento)
- * - Se tem site (foca em velocidade móvel e foco em conversão no WhatsApp)
+ * - Se tem Instagram (transforma seguidores e buscas em agendamentos no WhatsApp)
+ * - Se não tem site (cria vitrine de autoridade e tira dúvidas prévias)
+ * - Se já tem site (foca em velocidade mobile e conversão para o WhatsApp)
  * - Persona flexível (Ryan, Equipe Rvll, Dev Web)
  */
 export function generatePitch(
@@ -431,7 +1287,7 @@ export function generatePitch(
   const presence = lead.presence
   const hasInstagram = presence === 'social' || (lead.website && /instagram\.com/i.test(lead.website))
 
-  // Resolve idioma final (configurado manualmente ou detectado pela localização do lead)
+  // Resolve idioma final
   const lang = (settings.language && settings.language !== 'auto')
     ? settings.language
     : detectLeadLanguage(lead.address, lead.name)
@@ -441,169 +1297,74 @@ export function generatePitch(
     activePersona = recipient.type === 'business' && variationIndex % 2 === 1 ? 'rvll' : 'ryan'
   }
 
-  // 1. JAPONÊS (日本語) - Abordagem cortês empresarial (Keigo / 丁寧語)
+  // 1. JAPONÊS (日本語)
   if (lang === 'ja') {
     const greeting = `${recipient.display}様、初めまして。突然のご連絡失礼いたします。`
-
-    let presentation = ''
-    if (activePersona === 'rvll') {
-      presentation = `Webサイト・LP制作を行っておりますRvllチームと申します。地域ビジネスや店舗様向けに、スマートフォンで見やすく問い合わせ・予約につながる公式ページの制作を行っております。`
-    } else if (activePersona === 'dev') {
-      presentation = `Web開発をしておりますエンジニアです。表示速度が速く、LINEやWebからの予約・集客に特化したサイト構築を行っております。`
-    } else {
-      presentation = `フリーランスでWebサイト制作をしております${senderName}と申します。スマートフォンに最適化された清潔感のあるホームページ制作を専門にしております。`
-    }
-
-    let diagnosisAndValue = ''
-    if (hasInstagram) {
-      diagnosisAndValue = `Instagramでの素敵な発信を拝見いたしました。一方で、Google等で検索された新規のお客様がメニューや詳細をすぐに確認できる専用ページがあると、SNSのフォロワー様も迷わずスムーズにご予約・お問い合わせへと繋げることができます。`
-    } else if (presence === 'none') {
-      diagnosisAndValue = `Googleマップにて貴店を拝见したところ、専用の公式ホームページがまだ掲載されていないようでした。スマホで手軽に見られる清潔感のあるページを用意することで、初めてのお客様にも大きな安心感をお届けできます。`
-    } else {
-      diagnosisAndValue = `現在のオンラインでのご案内を拝見いたしました。現在8割以上のお客様がスマートフォンから検索されますので、表示速度が速く直感的に予約できる構造に整えることで、反響率を大幅に向上させることが可能です。`
-    }
-
-    let cta = `もしご興味がございましたら、貴店に合わせた簡単なプレビュー案を画像または動画でご案内できますが、いかがでしょうか？`
-    if (tone === 'direct') {
-      cta = `ご迷惑でなければ、今週中に簡単なデモ案をお送りすることも可能ですので、お気軽にお知らせください。`
-    }
-
+    const presentation = activePersona === 'rvll'
+      ? `Web制作・LP制作を行っておりますRvllチームと申します。地域店舗様向けに、スマートフォンで見やすく問い合わせ・予約につながる公式ページの制作を行っております。`
+      : `フリーランスでWebサイト制作をしております${senderName}と申します。スマートフォンに最適化された清潔感のあるホームページ制作を専門にしております。`
+    const diagnosisAndValue = hasInstagram
+      ? `Instagramでの発信を拝見いたしました。Googleで検索された新規のお客様がメニューや詳細をすぐに確認できる専用ページがあると、SNSのフォロワー様も迷わずスムーズにご予約・お問い合わせへと繋げることができます。`
+      : presence === 'none'
+        ? `Googleマップにて貴店を拝見したところ、専用の公式ホームページがまだ掲載されていないようでした。スマホで手軽に見られる清潔感のあるページを用意することで、初めてのお客様にも大きな安心感をお届けできます。`
+        : `現在のオンラインでのご案内を拝見いたしました。表示速度が速く直感的に予約できる構造に整えることで、反響率を大幅に向上させることが可能です。`
+    const cta = `もしご興味がございましたら、貴店に合わせた簡単なプレビュー案を画像または動画でご案内できますが、いかがでしょうか？`
     return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
   }
 
-  // 1.5. ÁRABE (العربية - Dubai / Emirados Árabes)
+  // 2. ÁRABE (العربية)
   if (lang === 'ar') {
     const greeting = `مرحباً ${recipient.display}، أتمنى أن تكونوا بخير!`
-    let presentation = ''
-    if (activePersona === 'rvll') {
-      presentation = `نحن من فريق Rvll، متخصصون في تصميم وتطوير مواقع إلكترونية عصرية وسريعة تركز على تحويل الزوار إلى حجوزات واستفسارات مباشرة عبر واتساب.`
-    } else if (activePersona === 'dev') {
-      presentation = `أنا مطور مواقع ويب متخصص في إنشاء صفحات هبوط سريعة وخفيفة ومتوافقة تماماً مع الهواتف الذكية لجلب العملاء.`
-    } else {
-      presentation = `اسمي ${senderName}، مطور مواقع ويب ومصمم صفحات هبوط متقدمة تركز على نمو الأعمال المحلية والخدمية.`
-    }
-
-    let diagnosisAndValue = ''
-    if (hasInstagram) {
-      diagnosisAndValue = `لقد اطلعت على حسابكم في إنستغرام وعملكم المميز! ومع ذلك، فإن العملاء الجدد القادمين من غوغل غالباً ما يبحثون عن صفحة رسمية متكاملة توضح كافة الخدمات وتتيح الحجز الفوري بضغطة زر واحدة.`
-    } else if (presence === 'none') {
-      diagnosisAndValue = `لاحظت نشاطكم التجاري على خرائط غوغل وتبيّن لي أنه ليس لديكم موقع رسمي مخصص حتى الآن. وجود موقع إلكتروني يعزز مصداقية العمل ويسهّل وصول العملاء للتواصل والحجز المباشر.`
-    } else {
-      diagnosisAndValue = `أكثر من 80% من عمليات البحث تتم اليوم عبر الهواتف، وامتلاك موقع حديث وفائق السرعة ومربوط بواتساب يضاعف عادةً عدد الاستفسارات الواردة.`
-    }
-
-    let cta = 'هل يناسبكم أن أشارككم نموذجاً مبسطاً وتصوراً سريعاً لكيفية ظهور هذه الصفحة لعملكم؟'
-    if (tone === 'preview') {
-      cta = 'هل ترغبون في رؤية فيديو توضيحي لمدة دقيقة يعرض هذا النموذج التجريبي؟'
-    } else if (tone === 'direct') {
-      cta = 'هل لديكم اهتمام بالاطلاع على نموذج تجريبي دون أي التزام خلال هذا الأسبوع؟'
-    }
-
+    const presentation = activePersona === 'rvll'
+      ? `نحن من فريق Rvll، متخصصون في تطوير صفحات ومواقع إلكترونية سريعة تركز على تحويل الزوار إلى حجوزات واستفسارات مباشرة عبر واتساب.`
+      : `اسمي ${senderName}، مطور مواقع ويب ومصمم صفحات هبوط متقدمة تركز على نمو الأعمال والخدمات المحلية.`
+    const diagnosisAndValue = hasInstagram
+      ? `لقد اطلعت على حسابكم في إنستغرام وعملكم المميز! ومع ذلك، فإن العملاء القادمين من غوغل يبحثون عن صفحة رسمية توضح كافة الخدمات وتتيح الحجز الفوري بضغطة زر واحدة.`
+      : presence === 'none'
+        ? `لاحظت نشاطكم على خرائط غوغل وتبيّن لي أنه ليس لديكم موقع رسمي حتى الآن. وجود صفحة خاصة يعزز الثقة ويسهّل وصول العملاء للحجز والتواصل المباشر.`
+        : `أكثر من 80% من عمليات البحث تتم عبر الهواتف، وامتلاك موقع فائق السرعة ومربوط بواتساب يضاعف عادةً عدد الاستفسارات.`
+    const cta = 'هل يناسبكم أن أشارككم نموذجاً مبسطاً وتصوراً سريعاً لكيفية ظهور هذه الصفحة لعملكم دون أي التزام؟'
     return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
   }
 
-  // 2. ESPANHOL (Español)
+  // 3. ESPANHOL (Español)
   if (lang === 'es') {
     const greeting = `Hola, ${recipient.display}, ¿cómo estás?`
-    let presentation = ''
-    if (activePersona === 'rvll') {
-      presentation = `Somos del equipo Rvll, especializados en el diseño de páginas web modernas y enfocadas en conversiones y citas directas por WhatsApp.`
-    } else if (activePersona === 'dev') {
-      presentation = `Soy desarrollador web enfocado en la creación de páginas institucionales rápidas, limpias y optimizadas para celulares.`
-    } else {
-      presentation = `Mi nombre es ${senderName}, soy desarrollador web y me dedico a crear sitios rápidos y prácticos para negocios locales.`
-    }
-
-    let diagnosisAndValue = ''
-    if (hasInstagram) {
-      diagnosisAndValue = `Vi su perfil en Instagram y el excelente trabajo que comparten. Sin embargo, quienes buscan en Google o entran al enlace de la bio muchas veces necesitan una página oficial donde ver todos los servicios y contactar directo por WhatsApp con 1 toque.`
-    } else if (presence === 'none') {
-      diagnosisAndValue = `Noté su negocio en Google y vi que no cuentan con un sitio web oficial. Tener una página propia brinda confianza inmediata, resuelve dudas frecuentes y facilita que nuevos clientes reserven directo por WhatsApp.`
-    } else {
-      diagnosisAndValue = `Estuve viendo su presencia online. Hoy más del 80% de los clientes busca por celular, y una página moderna ultra rápida suele duplicar la cantidad de contactos recibidos.`
-    }
-
-    let cta = '¿Tendrías interés en ver un modelo sencillo sin compromiso de cómo quedaría esta estructura para su negocio?'
-    if (tone === 'preview') {
-      cta = '¿Tendría sentido que te muestre una vista previa rápida de 1 minuto de cómo quedaría esta estructura?'
-    }
-
-    return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
-  }
-
-  // 3. ITALIANO
-  if (lang === 'it') {
-    const greeting = `Ciao ${recipient.display}, piacere di conoscerti!`
     const presentation = activePersona === 'rvll'
-      ? `Siamo il team Rvll, specializzati nella realizzazione di siti web moderni e veloci pensati per convertire visitatori in prenotazioni dirette.`
-      : `Mi chiamo ${senderName}, sono uno sviluppatore web e creo siti puliti, veloci e ad alta conversione per attività locali.`
+      ? `Somos del equipo Rvll, especializados en crear páginas web modernas y enfocadas en conversiones y citas directas por WhatsApp para ${specialty.specialtyLabel}.`
+      : `Mi nombre es ${senderName}, soy desarrollador web y me dedico a crear páginas rápidas y prácticas para ${specialty.specialtyLabel}.`
     const diagnosisAndValue = hasInstagram
-      ? `Ho visto la vostra bella presenza su Instagram. Tuttavia, chi vi cerca su Google spesso ha bisogno di un sito ufficiale dove visualizzare tutti i servizi e contattarvi direttamente in un clic.`
+      ? `Vi su perfil en Instagram y el excelente trabajo que comparten. Sin embargo, quienes buscan en Google o entran al enlace de la bio muchas veces necesitan una página oficial donde ver todos los servicios y contactar directo por WhatsApp con 1 toque.`
       : presence === 'none'
-        ? `Ho notato la vostra attività su Google e ho visto che non avete ancora un sito web ufficiale. Avere una pagina chiara e moderna trasmette subito fiducia e facilita le prenotazioni.`
-        : `Oggi oltre l'80% delle persone naviga da smartphone: un sito ultra-veloce ottimizzato per il contatto diretto raddoppia i messaggi ricevuti.`
-    const cta = `Ti farebbe piacere vedere un'anteprima veloce senza impegno di come potrebbe apparire il sito per la tua attività?`
+        ? `Noté su negocio en Google y vi que aún no cuentan con un sitio web oficial. Tener una página propia brinda confianza inmediata, resuelve dudas frecuentes y facilita que nuevos ${specialty.clientTerm}s reserven directo por WhatsApp.`
+        : `Estuve viendo su presencia online. Hoy más del 80% de los clientes busca por celular, y una página moderna ultra rápida suele duplicar la cantidad de contactos recibidos.`
+    const cta = '¿Tendrías interés en ver un modelo sencillo sin compromiso de cómo quedaría esta estructura para su negocio?'
     return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
   }
 
-  // 4. ALEMÃO (Deutsch)
-  if (lang === 'de') {
-    const greeting = `Hallo ${recipient.display}, ich hoffe, es geht Ihnen gut!`
-    const presentation = `Mein Name ist ${senderName}, ich bin Webentwickler und erstelle moderne, schnelle und für Mobilgeräte optimierte Websites für lokale Unternehmen.`
-    const diagnosisAndValue = presence === 'none'
-      ? `Ich habe Ihr Unternehmen auf Google gesehen und bemerkt, dass Sie noch keine offizielle Website haben. Eine klare mobile Website schafft sofortiges Vertrauen und ermöglicht direkte Buchungen.`
-      : `Eine moderne, schnelle Website verdoppelt oft die direkten Kundenanfragen über mobile Endgeräte.`
-    const cta = `Hätten Sie Interesse an einer kurzen, unverbindlichen Vorschau, wie so eine moderne Website für Ihr Unternehmen aussehen könnte?`
-    return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
-  }
-
-  // 5. FRANCÊS (Français)
-  if (lang === 'fr') {
-    const greeting = `Bonjour ${recipient.display}, j'espère que vous allez bien !`
-    const presentation = `Je m'appelle ${senderName}, je suis développeur web et je conçois des sites vitrines modernes, rapides et optimisés pour générer des prises de contact directes.`
-    const diagnosisAndValue = presence === 'none'
-      ? `J'ai remarqué votre établissement sur Google et j'ai vu que vous n'aviez pas encore de site officiel. Un site clair et soigné renforce la crédibilité et facilite la prise de contact en 1 clic.`
-      : `Aujourd'hui, plus de 80% des recherches se font sur mobile. Un site ultra-rapide permet souvent de doubler le taux de réservation.`
-    const cta = `Seriez-vous ouvert à voir un aperçu rapide et sans engagement de ce que cela donnerait pour votre établissement ?`
-    return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
-  }
-
-  // 6. INGLÊS (English - EUA, Austrália, UK, Canadá, etc.)
+  // 4. INGLÊS (English)
   if (lang === 'en') {
     const greeting = `Hi ${recipient.display}, hope you're doing well!`
-
-    let presentation = ''
-    if (activePersona === 'rvll') {
-      presentation = `We're from the Rvll team, specializing in clean, modern, and high-converting websites designed to turn visitors into booked clients.`
-    } else if (activePersona === 'dev') {
-      presentation = `I'm a web developer focused on building fast, mobile-friendly landing pages that drive direct inquiries and appointments.`
-    } else {
-      presentation = `My name is ${senderName}, I'm a web developer creating clean, high-performance websites for ${specialty.isHealth ? 'healthcare practices' : specialty.isFood ? 'restaurants and food services' : 'local businesses'}.`
-    }
-
-    let diagnosisAndValue = ''
-    if (hasInstagram) {
-      diagnosisAndValue = `I came across your Instagram profile and loved your work! However, customers finding you on Google or clicking your bio link often look for an official mobile page with your full services, making it easy to book or contact you directly in one tap.`
-    } else if (presence === 'none') {
-      diagnosisAndValue = `I noticed ${lead.name} on Google and saw that customers searching for your services don't find an official dedicated website. Having a clean, dedicated website builds immediate credibility, answers key questions, and directs customers straight to your direct contact.`
-    } else {
-      diagnosisAndValue = `I checked your online presence. Today, over 80% of local searches happen on mobile phones, and having an ultra-fast page optimized for instant WhatsApp or call inquiries often doubles the inquiry rate.`
-    }
-
-    let cta = 'Would you be open to checking out a quick, no-obligation preview of what this structure could look like for your business?'
-    if (tone === 'direct') {
-      cta = 'Would you be interested in taking a look at a clean model sometime this week?'
-    } else if (tone === 'preview') {
-      cta = 'Would it make sense for me to share a quick 1-minute video preview of this layout?'
-    }
-
+    const presentation = activePersona === 'rvll'
+      ? `We're from the Rvll team, specializing in clean, modern, and high-converting websites designed to turn visitors into booked clients.`
+      : `My name is ${senderName}, I'm a web developer creating clean, high-performance websites for ${specialty.isHealth ? 'healthcare practices' : specialty.isFood ? 'restaurants and food services' : 'local businesses'}.`
+    const diagnosisAndValue = hasInstagram
+      ? `I came across your Instagram profile and loved your work! However, customers finding you on Google or clicking your bio link often look for an official mobile page with your full services, making it easy to book or contact you directly in one tap.`
+      : presence === 'none'
+        ? `I noticed ${lead.name} on Google and saw that customers searching for your services don't find an official dedicated website. Having a clean, dedicated website builds immediate credibility, answers key questions, and directs customers straight to your direct contact.`
+        : `I checked your online presence. Today, over 80% of local searches happen on mobile phones, and having an ultra-fast page optimized for instant WhatsApp or call inquiries often doubles the inquiry rate.`
+    const cta = 'Would you be open to checking out a quick, no-obligation preview of what this structure could look like for your business?'
     return `${greeting}\n\n${presentation}\n\n${diagnosisAndValue}\n\n${cta}`
   }
 
-  // 1. Saudação em Português
-  const greeting = `Olá, ${recipient.display}, tudo bem?`
+  // ==========================================
+  // PORTUGUÊS (BRASIL) — ALTA CONVERSÃO & ZERO SPAM
+  // ==========================================
 
-  // 2. Apresentação adaptada (persona + mesma cidade ou de fora)
+  // 1. Saudação humana e calorosa
+  const greeting = `Olá, ${recipient.display}, tudo bem por aí?`
+
+  // 2. Apresentação sob medida para o nicho real
   const presentation = buildPresentation(
     persona,
     senderName,
@@ -615,58 +1376,102 @@ export function generatePitch(
     variationIndex,
   )
 
-  // 3. Diagnóstico e Necessidade Real da Empresa
+  // 3. Diagnóstico e Necessidade Real Específica de cada Estabelecimento
   let diagnosisAndValue = ''
 
-  // CENÁRIO A: TEM INSTAGRAM (Necessidade do Instagram -> Site Oficial -> WhatsApp)
+  // ----------------------------------------------------
+  // CENÁRIO A: POSSUI INSTAGRAM
+  // ----------------------------------------------------
   if (hasInstagram) {
-    if (specialty.isPelvicOrPhysio) {
+    if (specialty.nicheType === 'auto_detail') {
+      diagnosisAndValue = `Acompanhei o perfil de vocês no Instagram e os resultados e polimentos nos veículos são impecáveis! Só que quem procura por estética automotiva no Google na região quer ver uma página prática com fotos dos serviços, cuidados oferecidos e botão direto pro WhatsApp sem ter que esperar retorno no direct.`
+    } else if (specialty.nicheType === 'auto_mechanic') {
+      diagnosisAndValue = `Acompanhei a oficina de vocês no Instagram e o padrão dos reparos. Mas quem está com o carro precisando de manutenção na região e pesquisa no Google procura uma página ágil para ver os serviços atendidos e pedir orçamento direto no WhatsApp.`
+    } else if (specialty.isBarber) {
+      diagnosisAndValue = `Acompanhei a barbearia no Instagram e o padrão dos cortes tá muito diferenciado! Só que quem pesquisa por corte ou barba no Google muitas vezes não encontra uma página rápida com a tabela de serviços e o botão direto pra agendar no WhatsApp sem ter que ficar esperando resposta no direct.`
+    } else if (specialty.nicheType === 'aesthetics') {
+      diagnosisAndValue = `Acompanhei o perfil de vocês no Instagram e os resultados dos procedimentos são impecáveis! Porém, como procedimentos estéticos envolvem muitas dúvidas e confiança, quem pesquisa no Google ou clica na bio sente falta de uma página elegante explicando cada tratamento antes de agendar a avaliação no WhatsApp.`
+    } else if (specialty.isHairSalon) {
+      diagnosisAndValue = `Vi o perfil de vocês no Instagram e as fotos das transformações e mechas ficaram incríveis! Só que quem busca no Google muitas vezes quer ver a tabela de procedimentos e horários em um clique rápido pro WhatsApp.`
+    } else if (specialty.isNailOrLash) {
+      diagnosisAndValue = `Acompanhei os trabalhos de vocês no Instagram e a qualidade das unhas e cílios é impecável! Ter uma página própria na bio e no Google facilita para as clientes verem os modelos, tirar dúvidas de manutenção e já agendar o horário no WhatsApp com 1 toque.`
+    } else if (specialty.isTattoo) {
+      diagnosisAndValue = `Vi os trabalhos e artes de vocês no Instagram, muito estilo! Só que quem tá procurando tatuador ou piercer na região pelo Google muitas vezes não encontra uma página própria com orientações de orçamento e cuidados, facilitando chamar no WhatsApp.`
+    } else if (specialty.isPelvicOrPhysio) {
       diagnosisAndValue = `Acompanhei o perfil de vocês no Instagram e vi o ótimo trabalho que fazem divulgando a fisioterapia pélvica. Porém, como é uma área que envolve muita intimidade e dúvidas prévias, quem pesquisa pelo tratamento no Google ou clica na bio muitas vezes sente falta de uma página acolhedora explicando os casos indicados e permitindo agendar a avaliação no WhatsApp com 1 toque.`
+    } else if (specialty.isDental) {
+      diagnosisAndValue = `Acompanhei a presença de vocês no Instagram e o cuidado com os sorrisos dos pacientes. Mas quem pesquisa por dentista no Google muitas vezes quer ver uma página oficial que passe segurança imediata, esclareça os tratamentos oferecidos e permita agendar a avaliação com facilidade no WhatsApp.`
     } else if (specialty.isHealth) {
       diagnosisAndValue = `Acompanhei a presença de vocês no Instagram e o cuidado com as postagens. No entanto, no feed as informações se perdem rápido, e quem busca por atendimento no Google muitas vezes não encontra uma página oficial que reúna todas as especialidades e tire as dúvidas mais frequentes antes do agendamento no WhatsApp.`
+    } else if (specialty.isPilates || specialty.isGym) {
+      diagnosisAndValue = `Acompanhei o dia a dia das aulas no Instagram e a energia dos alunos é ótima! Quem busca por aula ou matrícula no Google valoriza muito uma página prática com a metodologia e o botão pra agendar a aula experimental no WhatsApp.`
+    } else if (specialty.isPet) {
+      diagnosisAndValue = `Vi o carinho com os pets que vocês compartilham no Instagram! Porém, quem precisa de banho & tosa, vacina ou consulta no dia a dia quer ver os serviços e mandar mensagem direto no WhatsApp em poucos segundos.`
     } else if (specialty.isFood) {
-      diagnosisAndValue = `Vi o Instagram de vocês e as fotos dão água na boca! Porém, quem vai pedir muitas vezes não encontra um cardápio digital próprio rápido para pedir direto pelo WhatsApp. Ter uma página web na bio e no Google agiliza o atendimento das mensagens e evita que vocês percam clientes para taxas de aplicativos.`
+      diagnosisAndValue = `Vi o Instagram de vocês e as fotos dão água na boca! Porém, quem vai pedir muitas vezes não encontra um cardápio digital próprio rápido para pedir direto pelo WhatsApp. Ter uma página web na bio e no Google agiliza os pedidos e evita que vocês percam clientes pras taxas pesadas dos apps de entrega.`
+    } else if (specialty.isGlazing || specialty.isFurniture) {
+      diagnosisAndValue = `Vi os projetos e instalações que vocês compartilham no Instagram, muito capricho! Ter uma página no Google reunindo fotos de trabalhos entregues passa total segurança para quem quer pedir orçamento no WhatsApp.`
     } else {
-      diagnosisAndValue = `Vi o trabalho bacana que vocês compartilham no Instagram. Mas quem busca pela empresa no Google ou clica no link da bio muitas vezes não encontra uma página oficial que organize todos os serviços e passe credibilidade imediata. Um site próprio limpo serve como vitrine para converter esses visitantes em clientes direto no WhatsApp.`
+      diagnosisAndValue = `Vi o trabalho bacana que vocês compartilham no Instagram. Mas quem busca por ${specialty.specialtyLabel} no Google ou clica no link da bio muitas vezes não encontra uma página oficial que organize todos os serviços e passe credibilidade imediata. Uma página própria limpa serve como vitrine para converter esses visitantes em ${specialty.clientTerm}s direto no WhatsApp.`
     }
   }
 
-  // CENÁRIO B: NÃO TEM SITE (Necessidade de Vitrine Oficial no Google)
+  // ----------------------------------------------------
+  // CENÁRIO B: NÃO TEM SITE (OPORTUNIDADE DE VITRINE NO GOOGLE)
+  // ----------------------------------------------------
   else if (presence === 'none') {
-    if (specialty.isPelvicOrPhysio) {
-      if (variationIndex % 2 === 0) {
-        diagnosisAndValue = `Vi o seu consultório ${location} e notei a sua especialização em fisioterapia pélvica. Por ser uma área tão específica e que exige muita confiança, ter um site institucional explicando de forma acolhedora para quais casos o tratamento é indicado tira as principais dúvidas da ${specialty.clientTerm} antes do primeiro contato e facilita o agendamento no WhatsApp.`
-      } else {
-        diagnosisAndValue = `Notei o seu atendimento ${location} com foco em ${specialty.specialtyLabel}. Ter uma página oficial na internet valoriza muito o seu nome profissional, esclarece as dúvidas mais comuns sobre o tratamento e permite que a ${specialty.clientTerm} marque a avaliação no seu WhatsApp com apenas um toque.`
-      }
+    if (specialty.nicheType === 'auto_detail') {
+      diagnosisAndValue = `Vi o espaço de vocês ${location} e o padrão da estética automotiva. Ter uma página web direta no Google com fotos de antes e depois dos veículos e botão de orçamento rápido no WhatsApp passa total credibilidade pra quem quer cuidar do carro na região.`
+    } else if (specialty.nicheType === 'auto_mechanic') {
+      diagnosisAndValue = `Vi a oficina de vocês ${location} e a estrutura dos atendimentos. Ter uma página web direta no Google com os principais serviços mecânicos e botão de orçamento rápido no WhatsApp passa total segurança pra quem precisa de manutenção preventiva ou socorro na região.`
+    } else if (specialty.isBarber) {
+      diagnosisAndValue = `Vi a barbearia de vocês ${location} e o estilo dos atendimentos. Como hoje quase todo mundo procura corte ou barba pelo celular no Google Maps, ter uma página simples mostrando os cortes, horários e botão de agendamento no WhatsApp evita que novos clientes da região procurem outro lugar.`
+    } else if (specialty.nicheType === 'aesthetics') {
+      diagnosisAndValue = `Vi o espaço de vocês ${location} e os procedimentos que realizam. Como estética envolve muita confiança e pesquisa prévia, ter uma página acolhedora explicando cada tratamento tira as principais dúvidas da ${specialty.clientTerm} antes do contato e facilita o agendamento da avaliação no WhatsApp.`
+    } else if (specialty.isHairSalon) {
+      diagnosisAndValue = `Vi o salão de vocês ${location} e o padrão dos cuidados capilares. Ter uma página simples mostrando fotos de antes e depois e botão direto pro WhatsApp facilita para novas clientes agendarem horários sem complicação.`
+    } else if (specialty.isNailOrLash) {
+      diagnosisAndValue = `Vi o espaço de vocês ${location} e o capricho nos atendimentos. Ter uma página simples mostrando fotos dos procedimentos e botão direto pro WhatsApp valoriza o trabalho e facilita para novas clientes agendarem horários sem complicação.`
+    } else if (specialty.isTattoo) {
+      diagnosisAndValue = `Vi o studio de vocês ${location} e o estilo dos trabalhos. Ter uma página web prática apresentando fotos de tattoos/piercings e botão de orçamento no WhatsApp atrai novos clientes que buscam por estúdios de confiança no Google.`
+    } else if (specialty.isPelvicOrPhysio) {
+      diagnosisAndValue = `Vi o seu consultório ${location} e notei a sua especialização em ${specialty.specialtyLabel}. Por ser uma área que exige muita confiança, ter uma página acolhedora explicando para quais casos o tratamento é indicado tira as principais dúvidas da ${specialty.clientTerm} antes do primeiro contato e facilita o agendamento no WhatsApp.`
+    } else if (specialty.isDental) {
+      diagnosisAndValue = `Vi o consultório de vocês ${location} e o padrão dos atendimentos. Ter uma página oficial na internet valoriza muito o nome do consultório, passa segurança imediata para quem tem dúvidas sobre tratamentos e facilita o agendamento de avaliações no WhatsApp.`
     } else if (specialty.isHealth) {
       diagnosisAndValue = `Vi o espaço de vocês ${location} e notei que quem pesquisa pela clínica no Google não encontra uma página oficial que reúna todas as atividades e cuidados oferecidos. Um site simples organiza as terapias do espaço e serve como uma vitrine acolhedora para novos ${specialty.clientTerm}s da região.`
+    } else if (specialty.isPilates || specialty.isGym) {
+      diagnosisAndValue = `Vi o espaço de vocês ${location} e a proposta das aulas. Quem pesquisa por ${specialty.specialtyLabel} no Google muitas vezes não encontra uma página explicando as modalidades, turmas e o botão pra agendar aula experimental no WhatsApp.`
+    } else if (specialty.isPet) {
+      diagnosisAndValue = `Vi o atendimento de vocês com os pets ${location}. Ter uma página simples apresentando os cuidados veterinários, banho & tosa e horários passa muita segurança pros tutores e agiliza contatos no WhatsApp.`
     } else if (specialty.isFood) {
-      diagnosisAndValue = `Vi o espaço de vocês ${location} e notei que quem pesquisa pelo estabelecimento no Google não encontra um cardápio digital oficial fácil para pedir direto pelo WhatsApp. Ter uma página própria rápida com fotos reais e botão direto pro WhatsApp economiza tempo no atendimento e fideliza clientes sem taxas de aplicativos.`
-    } else if (specialty.isAuto) {
-      diagnosisAndValue = `Vi o trabalho de vocês ${location} e o padrão dos serviços oferecidos. Ter um site simples apresentando os principais cuidados realizados e botão direto pro WhatsApp passa muita confiança para quem está procurando por socorro ou manutenção na região.`
+      diagnosisAndValue = `Vi o espaço de vocês ${location} e a qualidade do cardápio. Ter uma página própria rápida com fotos reais e botão direto pro WhatsApp economiza tempo no atendimento e fideliza clientes sem as comissões abusivas dos apps de entrega.`
+    } else if (specialty.isGlazing || specialty.isFurniture) {
+      diagnosisAndValue = `Vi a qualidade dos serviços de vocês ${location}. Ter uma página com fotos de trabalhos já entregues e botão para orçamento rápido no WhatsApp passa muita credibilidade para quem está orçando na região.`
     } else {
-      diagnosisAndValue = `Vi o negócio de vocês ${location} e notei que quem pesquisa pela empresa no Google não encontra uma página oficial com serviços e horários atualizados. Um site limpo e bem posicionado serve como vitrine e direciona contatos quentes direto para o seu WhatsApp.`
+      diagnosisAndValue = `Vi o espaço de vocês ${location} e notei que quem pesquisa por ${specialty.specialtyLabel} no Google não encontra uma página oficial com serviços e horários atualizados. Um site limpo e bem posicionado serve como vitrine e direciona contatos quentes direto para o seu WhatsApp.`
     }
   }
 
-  // CENÁRIO C: JÁ TEM SITE (Necessidade de Otimização Mobile e Conversão WhatsApp)
+  // ----------------------------------------------------
+  // CENÁRIO C: JÁ TEM SITE (OTIMIZAÇÃO MOBILE & CONVERSÃO)
+  // ----------------------------------------------------
   else {
-    diagnosisAndValue = `Dei uma olhada na presença online de vocês ${location}. Hoje, mais de 80% das pessoas buscam serviços pelo celular, e muitos sites antigos acabam perdendo oportunidades por não serem rápidos ou não direcionarem com clareza para o WhatsApp. Uma página moderna e ultrarrápida costuma dobrar a taxa de contatos recebidos.`
+    diagnosisAndValue = `Dei uma olhada na presença online de vocês ${location}. Hoje mais de 80% das pessoas pesquisam serviços pelo celular, e muitos sites antigos acabam demorando para carregar ou não direcionam com clareza para o WhatsApp. Uma página moderna e ultrarrápida costuma dobrar a taxa de contatos recebidos de novos ${specialty.clientTerm}s.`
   }
 
-  // 4. Pergunta de fechamento (CTA suave sem pressão)
+  // 4. Pergunta de fechamento suave (Soft CTA com gramática 100% natural)
+  const ctaTarget = recipient.type === 'person' ? 'você' : 'o espaço de vocês'
   let cta = ''
   if (tone === 'preview') {
-    cta = 'Faz sentido eu mostrar uma prévia de como ficaria essa estrutura?'
+    cta = `Faz sentido eu te mandar uma prévia rápida de como ficaria essa estrutura para ${ctaTarget}?`
   } else if (tone === 'direct') {
-    cta = 'Teria interesse em ver um modelo simples sem compromisso?'
+    cta = `Teria interesse em ver um modelo simples sem compromisso nenhum?`
   } else {
     const ctaVariants = [
-      'Teria interesse em avaliar a criação de um site próprio para o seu consultório?',
-      'Faz sentido eu mostrar uma prévia de como ficaria essa estrutura?',
-      'Teria interesse em ver um modelo simples sem compromisso?',
-      'Se fizer sentido, posso gravar um vídeo rápido de 1 minuto mostrando como ficaria essa vitrine na prática.',
+      `Faz sentido eu te mandar uma prévia simples sem compromisso de como ficaria essa estrutura para ${ctaTarget}?`,
+      `Se fizer sentido, posso gravar um vídeo rápido de 1 minuto mostrando como ficaria essa vitrine na prática para ${ctaTarget}.`,
+      `Teria interesse em dar uma olhada em um modelo simples e sem compromisso para ${ctaTarget}?`,
     ]
     cta = ctaVariants[variationIndex % ctaVariants.length]
   }
