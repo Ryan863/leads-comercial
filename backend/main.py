@@ -6,8 +6,11 @@ import re
 import sys
 import uuid
 
-# Garante ProactorEventLoop no Windows para suporte ao Playwright (subprocess_exec)
 if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     try:
         import uvicorn.loops.asyncio
@@ -40,12 +43,22 @@ logger = logging.getLogger("SondarAPI")
 
 from scraper import LeadScraper
 from exporter import export_to_csv, export_to_excel_html, generate_export_filename
+from database import init_db
+from outreach_router import router as outreach_router
+from adapters.whatsapp_driver import whatsapp_driver
+
+# Inicializa banco SQLite local
+init_db()
 
 app = FastAPI(
     title="Sondar Scraper Engine API",
     description="Motor de busca e raspagem B2B headless sob demanda do Sondar",
     version="2.0.0",
 )
+
+# Rotas da Fila de Disparo Autonomo
+app.include_router(outreach_router, prefix="/api/outreach")
+app.include_router(outreach_router, prefix="/api/backend/outreach")
 
 # Habilita CORS amplo para desenvolvimento local e integração com Next.js
 app.add_middleware(

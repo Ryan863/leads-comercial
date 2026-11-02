@@ -9,6 +9,7 @@ import {
   SUPPORTED_LANGUAGES,
   type PitchSettings,
   type PitchTone,
+  type SenderPersona,
 } from '@/lib/pitch-generator'
 
 type Props = {
@@ -144,7 +145,6 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
                 value={settings.senderName}
                 onChange={(e) => setSettings({ ...settings, senderName: e.target.value })}
                 placeholder="Ex: Ryan"
-                required
                 className="h-10 w-full rounded-lg border border-input bg-background/70 px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
               />
             </div>
@@ -160,7 +160,6 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
                 value={settings.senderCity}
                 onChange={(e) => setSettings({ ...settings, senderCity: e.target.value })}
                 placeholder="Ex: Videira"
-                required
                 className="h-10 w-full rounded-lg border border-input bg-background/70 px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
               />
             </div>
@@ -175,7 +174,7 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
               type="text"
               value={settings.senderRole}
               onChange={(e) => setSettings({ ...settings, senderRole: e.target.value })}
-              placeholder="Ex: crio sites limpos e práticos"
+              placeholder="Ex: desenvolvedor web, crio sites modernos e práticos"
               className="h-10 w-full rounded-lg border border-input bg-background/70 px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
             />
           </div>
@@ -232,6 +231,52 @@ export function PitchConfigDialog({ open, onClose, onSaved }: Props) {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Apresentação Padrão (Persona) */}
+          <div>
+            <span className="mb-1.5 block text-xs font-semibold text-muted-foreground">
+              Como quer se apresentar por padrão (Assinatura):
+            </span>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {(
+                [
+                  { id: 'ryan' as SenderPersona, title: 'Pessoal', desc: 'Usa seu nome ("Meu nome é Ryan...")' },
+                  { id: 'dev' as SenderPersona, title: 'Dev Web', desc: 'Desenvolvedor web ("Sou desenvolvedor web...")' },
+                  { id: 'auto' as SenderPersona, title: 'Auto', desc: 'Adapta pelo contexto do nicho' },
+                  { id: 'rvll' as SenderPersona, title: 'Equipe', desc: 'Apresenta como equipe de desenvolvimento' },
+                ] as const
+              ).map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSettings({ ...settings, persona: p.id })}
+                  className={`rounded-lg border p-2.5 text-left transition ${
+                    (settings.persona || 'ryan') === p.id
+                      ? 'border-primary bg-primary/10 text-foreground font-semibold shadow-sm'
+                      : 'border-border bg-background/40 text-muted-foreground hover:bg-accent hover:text-foreground'
+                  }`}
+                >
+                  <p className="text-xs font-bold text-foreground">{p.title}</p>
+                  <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{p.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Instruções Adicionais de Texto (Opcional) */}
+          <div>
+            <label htmlFor="cfg-instructions" className="mb-1.5 block text-xs font-semibold text-muted-foreground">
+              Preferência de abordagem / Instrução extra (opcional):
+            </label>
+            <input
+              id="cfg-instructions"
+              type="text"
+              value={settings.customInstructions || ''}
+              onChange={(e) => setSettings({ ...settings, customInstructions: e.target.value })}
+              placeholder="Ex: Focar em demonstrar vitrine no WhatsApp com prévia rápida"
+              className="h-10 w-full rounded-lg border border-input bg-background/70 px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
           </div>
 
           {/* Seção Gemini API */}

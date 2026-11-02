@@ -81,7 +81,10 @@ def clean_phone(raw: str, default_ddd: str = "", default_country: str = "") -> T
     if not raw:
         return ("", False)
     
-    clean_raw = raw.strip()
+    # Remove CEPs brasileiros (ex: 89560-000) ou códigos postais antes de extrair dígitos
+    clean_raw = re.sub(r"\b\d{5}-\d{3}\b", "", raw).strip()
+    if not clean_raw:
+        return ("", False)
     
     # 1. Caso com '+' explícito em qualquer parte da string (Ex: "Phone: +1 305-598-6070", "tel:+97141234567")
     plus_match = re.search(r"\+\s*([0-9\s().-]{7,25})", clean_raw)
@@ -306,18 +309,24 @@ def clean_phone(raw: str, default_ddd: str = "", default_country: str = "") -> T
     b_digits = digits
     if b_digits.startswith("55") and len(b_digits) in (12, 13):
         b_digits = b_digits[2:]
-    if b_digits.startswith("0") and len(b_digits) in (11, 12):
+    if b_digits.startswith("0") and len(b_digits) in (11, 12) and not b_digits.startswith("0800"):
         b_digits = b_digits[1:]
     if len(b_digits) in (8, 9) and clean_def_ddd in VALID_DDDS:
         b_digits = f"{clean_def_ddd}{b_digits}"
 
     if len(b_digits) in (10, 11) and b_digits[:2] in VALID_DDDS:
         ddd = b_digits[:2]
-        if len(b_digits) == 11:
+        subscriber = b_digits[2:]
+        if len(b_digits) == 11 and subscriber.startswith("9"):
             return (f"({ddd}) {b_digits[2:7]}-{b_digits[7:]}", True)
-        return (f"({ddd}) {b_digits[2:6]}-{b_digits[6:]}", True)
+        if len(b_digits) == 10 and subscriber[0] in ("2", "3", "4", "5"):
+            return (f"({ddd}) {b_digits[2:6]}-{b_digits[6:]}", True)
 
-    # 4. Fallback Internacional Geral
+    # Se o país alvo for Brasil (ou padrão), rejeita sequências numéricas inválidas (como CEP + número de rua)
+    if c in ("", "BR", "BRASIL", "BRAZIL", "AUTO"):
+        return ("", False)
+
+    # 4. Fallback Internacional Geral (somente quando país alvo é internacional)
     if len(digits) == 10:
         return (f"+1 ({digits[:3]}) {digits[3:6]}-{digits[6:]}", True)
     return (f"+{digits}", True)

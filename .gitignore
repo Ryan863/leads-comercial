@@ -34,6 +34,16 @@ Thumbs.db
 .idea/
 *.tsbuildinfo
 
+# Local Database & Sessions
+*.db
+*.db-shm
+*.db-wal
+backend/outreach.db*
+backend/whatsapp_session/
+whatsapp_session/
+backend/.wpp_session/
+.wpp_session/
+
 # V0 / Sandbox
 __v0_*
 .snowflake/

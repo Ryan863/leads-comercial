@@ -1,9 +1,16 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, Cpu, HelpCircle, Loader2, Radio, Sparkles, Zap } from 'lucide-react'
+import { Bot, Cpu, Radio, Sparkles, Zap } from 'lucide-react'
 import { generateLeads, type Lead } from '@/lib/leads'
-import { getStoredPitchSettings, type PitchSettings, DEFAULT_PITCH_SETTINGS } from '@/lib/pitch-generator'
+import {
+  getStoredPitchSettings,
+  extractNicheFromQuery,
+  restorePortugueseAccents,
+  type PitchSettings,
+  DEFAULT_PITCH_SETTINGS,
+} from '@/lib/pitch-generator'
+import { type OutreachStatusResponse, fetchOutreachStatus, stopOutreach } from '@/lib/outreach'
 import { SearchPanel } from './search-panel'
 import { StatsCards } from './stats-cards'
 import { FiltersBar, type PresenceFilter, type ViewMode } from './filters-bar'
@@ -12,8 +19,24 @@ import { ExportActions } from './export-actions'
 import { IdleState, NoResults, ScanningState } from './radar-states'
 import { LeadDetailDialog } from './lead-detail-dialog'
 import { PitchConfigDialog } from './pitch-config-dialog'
+import { OutreachDialog } from './outreach-dialog'
+import { OutreachMonitor } from './outreach-monitor'
 
 const DEMO_QUERY = 'Pizzarias em Videira - SC'
+
+function formatCategoryLabel(rawNiche: string): string {
+  const restored = restorePortugueseAccents(rawNiche.trim())
+  if (!restored) return 'Comércio Local'
+  const smallWords = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'para', 'com'])
+  return restored
+    .split(/\s+/)
+    .map((w, idx) => {
+      const lower = w.toLowerCase()
+      if (idx > 0 && smallWords.has(lower)) return lower
+      return lower.charAt(0).toUpperCase() + lower.slice(1)
+    })
+    .join(' ')
+}
 
 export function RadarApp() {
   const [query, setQuery] = useState(DEMO_QUERY)
@@ -32,10 +55,36 @@ export function RadarApp() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [configOpen, setConfigOpen] = useState(false)
   const [pitchSettings, setPitchSettings] = useState<PitchSettings>(DEFAULT_PITCH_SETTINGS)
+  const [outreachOpen, setOutreachOpen] = useState(false)
+  const [outreachStatus, setOutreachStatus] = useState<OutreachStatusResponse | null>(null)
 
   useEffect(() => {
     setPitchSettings(getStoredPitchSettings())
   }, [])
+
+  // Sincronização periódica do status do worker de disparo
+  useEffect(() => {
+    let mounted = true
+    async function syncOutreach() {
+      try {
+        const data = await fetchOutreachStatus()
+        if (mounted) {
+          setOutreachStatus(data)
+        }
+      } catch {
+        // Silencioso se o backend ainda estiver subindo
+      }
+    }
+
+    syncOutreach()
+    const pollInterval = outreachStatus?.is_running ? 2000 : 8000
+    const interval = setInterval(syncOutreach, pollInterval)
+
+    return () => {
+      mounted = false
+      clearInterval(interval)
+    }
+  }, [outreachStatus?.is_running])
 
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollingTimer = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -93,6 +142,9 @@ export function RadarApp() {
     setProgress(10)
     setLeads([])
 
+    const extractedNiche = extractNicheFromQuery(term)
+    const fallbackCategory = extractedNiche ? formatCategoryLabel(extractedNiche) : 'Comércio Local'
+
     // Modo demonstração instantâneo forçado pelo usuário
     if (forceDemo) {
       setLeads(generateLeads(term, quantity, country))
@@ -103,7 +155,6 @@ export function RadarApp() {
 
     // Se o backend estiver online, inicia a raspagem real via streaming SSE + polling sincronizado
     if (isBackendOnline) {
-      // Animação de progresso suave durante inicialização do motor Playwright
       timer.current = setInterval(() => {
         setProgress((prev) => {
           if (prev < 28) return prev + 2
@@ -126,14 +177,29 @@ export function RadarApp() {
         const jobId = data.id
         setActiveJobId(jobId)
 
-        // Função auxiliar para incorporar leads sem duplicatas
+        // Função auxiliar para incorporar leads sem duplicatas e injetar o contexto exato da pesquisa
         const mergeLeads = (newLeads: Lead[]) => {
           setLeads((prev) => {
             const combined = [...prev]
-            for (const item of newLeads) {
+            for (const rawItem of newLeads) {
+              const isGenericCat =
+                !rawItem.category ||
+                /^(com[eé]rcio e servi[cç]os|com[eé]rcio local|servi[cç]os|empresa local|business)$/i.test(
+                  rawItem.category.trim(),
+                )
+              const item: Lead = {
+                ...rawItem,
+                category: isGenericCat ? fallbackCategory : rawItem.category,
+                searchQuery: rawItem.searchQuery || term,
+                searchedNiche: rawItem.searchedNiche || extractedNiche || rawItem.category,
+              }
+
               const alreadyHasId = combined.some((c) => c.id === item.id)
               const phoneDigits = item.phone?.replace(/\D/g, '')
-              const alreadyHasPhone = phoneDigits && phoneDigits.length >= 8 && combined.some((c) => c.phone?.replace(/\D/g, '') === phoneDigits)
+              const alreadyHasPhone =
+                phoneDigits &&
+                phoneDigits.length >= 8 &&
+                combined.some((c) => c.phone?.replace(/\D/g, '') === phoneDigits)
               if (!alreadyHasId && !alreadyHasPhone) {
                 combined.push(item)
               }
@@ -164,12 +230,11 @@ export function RadarApp() {
                 console.warn('Alerta do scraper:', payload.message)
               }
             } catch {
-              // Ignore parse errors (e.g. comments/heartbeats)
+              // Ignore parse errors
             }
           }
 
           eventSource.onerror = () => {
-            // Em caso de instabilidade na conexão SSE, mantém o polling como salvaguarda
             if (eventSourceRef.current) {
               eventSourceRef.current.close()
               eventSourceRef.current = null
@@ -179,7 +244,7 @@ export function RadarApp() {
           console.warn('Erro ao abrir EventSource, utilizando polling de redundância.', sseErr)
         }
 
-        // 2. Polling ativo como redundância garantida (elimina qualquer congelamento em 5%)
+        // 2. Polling ativo como redundância garantida
         let pollCount = 0
         pollingTimer.current = setInterval(async () => {
           pollCount += 1
@@ -194,14 +259,7 @@ export function RadarApp() {
                 setProgress(pct)
               }
 
-              if (statusData.status === 'completed') {
-                stopAllScans()
-                setProgress(100)
-                setScanning(false)
-                return
-              }
-
-              if (statusData.status === 'error') {
+              if (statusData.status === 'completed' || statusData.status === 'error') {
                 stopAllScans()
                 setProgress(100)
                 setScanning(false)
@@ -212,8 +270,8 @@ export function RadarApp() {
             console.debug('Polling check falhou momentaneamente:', pollErr)
           }
 
-          // Timeout de segurança após 50 segundos para nunca travar a tela
-          if (pollCount > 40) {
+          // Timeout de segurança após 120 segundos
+          if (pollCount > 100) {
             stopAllScans()
             setProgress(100)
             setScanning(false)
@@ -302,12 +360,36 @@ export function RadarApp() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
+            onClick={() => setOutreachOpen(true)}
+            title="Fila de disparo autônomo em segundo plano (Sair e deixar o PC rodando)"
+            className={`btn-press hover-lift inline-flex w-fit items-center gap-2 rounded-lg border px-3.5 py-2 text-xs font-semibold transition ${
+              outreachStatus?.is_running
+                ? 'border-success/60 bg-success/20 text-success shadow-sm shadow-success/20'
+                : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+            }`}
+          >
+            {outreachStatus?.is_running ? (
+              <>
+                <span className="size-2 rounded-full bg-success animate-ping" />
+                Piloto Automático Ativo ({outreachStatus.stats.sent_today}/{outreachStatus.config.daily_limit})
+              </>
+            ) : (
+              <>
+                <Bot className="size-3.5" aria-hidden="true" />
+                Modo Piloto Automático (Sair e Deixar Rodando)
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setConfigOpen(true)}
             title="Personalize seu nome, cidade e IA de mensagens"
             className="btn-press hover-lift inline-flex w-fit items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3.5 py-2 text-xs font-semibold text-primary transition hover:bg-primary/20"
           >
             <Sparkles className="size-3.5" aria-hidden="true" />
-            Automação de Mensagens ({pitchSettings.senderName || 'Ryan'} • {pitchSettings.senderCity || 'Videira'})
+            Automação de Mensagens ({pitchSettings.senderName ? pitchSettings.senderName : 'Dev Web'}
+            {pitchSettings.senderCity ? ` • ${pitchSettings.senderCity}` : ''})
           </button>
 
           <button
@@ -323,6 +405,17 @@ export function RadarApp() {
           </button>
         </div>
       </div>
+
+      {/* Monitor em Tempo Real da Fila de Disparo Autônomo */}
+      <OutreachMonitor
+        status={outreachStatus}
+        onStop={async () => {
+          await stopOutreach()
+          const s = await fetchOutreachStatus()
+          setOutreachStatus(s)
+        }}
+        onOpenSettings={() => setOutreachOpen(true)}
+      />
 
       <SearchPanel
         query={query}
@@ -386,11 +479,21 @@ export function RadarApp() {
         </>
       )}
 
-      <LeadDetailDialog lead={selected} onClose={() => setSelected(null)} />
+      <LeadDetailDialog
+        lead={selected}
+        searchQuery={scannedQuery || query}
+        onClose={() => setSelected(null)}
+      />
       <PitchConfigDialog
         open={configOpen}
         onClose={() => setConfigOpen(false)}
         onSaved={() => setPitchSettings(getStoredPitchSettings())}
+      />
+      <OutreachDialog
+        open={outreachOpen}
+        onClose={() => setOutreachOpen(false)}
+        currentLeads={leads}
+        onStatusChange={setOutreachStatus}
       />
     </div>
   )

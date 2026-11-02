@@ -18,7 +18,7 @@ const HEADERS = [
   'Mensagem WhatsApp (Abordagem Pronta)',
 ]
 
-function toRows(leads: Lead[]) {
+function toRows(leads: Lead[], query?: string) {
   return leads.map((l) => [
     l.name,
     l.category,
@@ -31,18 +31,20 @@ function toRows(leads: Lead[]) {
     PRESENCE_LABEL[l.presence],
     l.website ?? '',
     l.address,
-    generatePitch(l),
+    generatePitch(l, undefined, 0, query || l.searchQuery),
   ])
 }
 
 function sanitizeSlug(text: string): string {
   if (!text) return 'geral'
-  return text
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '') || 'geral'
+  return (
+    text
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'geral'
+  )
 }
 
 export function buildExportFilename(query?: string, ext: 'csv' | 'xls' = 'csv'): string {
@@ -85,7 +87,7 @@ function download(content: string, filename: string, type: string) {
 
 export function exportCsv(leads: Lead[], query?: string) {
   const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
-  const csv = [HEADERS, ...toRows(leads)].map((r) => r.map(escape).join(';')).join('\n')
+  const csv = [HEADERS, ...toRows(leads, query)].map((r) => r.map(escape).join(';')).join('\n')
   const filename = buildExportFilename(query, 'csv')
   download(csv, filename, 'text/csv;charset=utf-8')
 }
@@ -98,7 +100,7 @@ export function exportExcel(leads: Lead[], query?: string) {
       .replace(/>/g, '&gt;')
       .replace(/\n/g, '<br/>')
   const head = `<tr>${HEADERS.map((h) => `<th style="background:#2563eb;color:#fff;font-weight:bold;padding:6px;">${h}</th>`).join('')}</tr>`
-  const body = toRows(leads)
+  const body = toRows(leads, query)
     .map((r) => `<tr>${r.map((c) => `<td style="vertical-align:top;padding:6px;border:1px solid #ddd;">${esc(c)}</td>`).join('')}</tr>`)
     .join('')
   const html = `<html><head><meta charset="utf-8"></head><body><table border="1" style="font-family:Arial,sans-serif;font-size:12px;border-collapse:collapse;">${head}${body}</table></body></html>`
@@ -107,5 +109,10 @@ export function exportExcel(leads: Lead[], query?: string) {
 }
 
 export async function copyPhones(leads: Lead[]) {
-  await navigator.clipboard.writeText(leads.map((l) => l.phone).join('\n'))
+  await navigator.clipboard.writeText(
+    leads
+      .map((l) => l.phone)
+      .filter(Boolean)
+      .join('\n'),
+  )
 }
