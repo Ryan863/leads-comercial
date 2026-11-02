@@ -13,12 +13,10 @@ import {
   MapPin,
   MessageCircle,
   Phone,
-  RefreshCw,
   Search,
   Settings,
   Sparkles,
   Star,
-  Users,
   X,
 } from 'lucide-react'
 
@@ -34,10 +32,10 @@ function InstagramIcon({ className = 'size-3' }: { className?: string }) {
 
 import type { Lead } from '@/lib/leads'
 import {
-  detectLeadLanguage,
   extractSpecialtyInfo,
   generatePitch,
   getStoredPitchSettings,
+  saveStoredPitchSettings,
   isLeadInSameCity,
   SUPPORTED_LANGUAGES,
   type PitchLanguage,
@@ -49,10 +47,11 @@ import { PitchConfigDialog } from './pitch-config-dialog'
 
 type Props = {
   lead: Lead | null
+  searchQuery?: string
   onClose: () => void
 }
 
-export function LeadDetailDialog({ lead, onClose }: Props) {
+export function LeadDetailDialog({ lead, searchQuery, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null)
   const [copied, setCopied] = useState(false)
   const [message, setMessage] = useState('')
@@ -67,6 +66,9 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
   const [showAiInput, setShowAiInput] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
   const [serverHasKey, setServerHasKey] = useState(false)
+  const [savedPersonaFeedback, setSavedPersonaFeedback] = useState(false)
+
+  const effectiveQuery = lead?.searchQuery || searchQuery || lead?.searchedNiche || ''
 
   // Verifica se há chave Gemini no servidor
   useEffect(() => {
@@ -87,6 +89,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
     tone: PitchTone,
     varIdx: number,
     customInst?: string,
+    queryCtx?: string,
   ) => {
     setLoadingAi(true)
     try {
@@ -94,10 +97,14 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          lead: targetLead,
+          lead: {
+            ...targetLead,
+            searchQuery: targetLead.searchQuery || queryCtx,
+          },
           settings: { ...settings, persona, tone, language: lang },
           customInstructions: customInst,
           variationIndex: varIdx,
+          searchQuery: queryCtx || targetLead.searchQuery,
         }),
       })
 
@@ -121,33 +128,45 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
     if (lead) {
       const settings = getStoredPitchSettings()
       setSelectedTone(settings.tone || 'consultative')
-      setSelectedPersona(settings.persona || 'auto')
+      const effectivePersona = settings.persona || 'ryan'
+      setSelectedPersona(effectivePersona)
       const initialLang = (settings.language && settings.language !== 'auto') ? settings.language : 'auto'
       setSelectedLanguage(initialLang)
       setVariationIndex(0)
       setIsAiGenerated(false)
 
-      // 1. Gera versão determinística ultra-adaptada por nicho imediatamente (sem delay)
+      let savedMsg = lead.id && typeof window !== 'undefined' ? localStorage.getItem(`sondar_custom_msg_${lead.id}`) : null
+      // Se havia texto antigo salvo com o fallback genérico "estabelecimentos de comércio e serviços", descarta para regenerar adaptado
+      if (savedMsg && /com[eé]rcio e servi[cç]os/i.test(savedMsg)) {
+        localStorage.removeItem(`sondar_custom_msg_${lead.id}`)
+        savedMsg = null
+      }
+
       const initialText = generatePitch(
         lead,
         {
           ...settings,
-          persona: settings.persona || 'auto',
+          persona: effectivePersona,
           tone: settings.tone || 'consultative',
           language: initialLang,
         },
         0,
+        effectiveQuery,
       )
-      setMessage(initialText)
       setLocalFallback(initialText)
 
-      // 2. Se temos chave Gemini configurada (no cliente ou servidor) e autoGemini ativo, dispara em tempo real
+      if (savedMsg) {
+        setMessage(savedMsg)
+      } else {
+        setMessage(initialText)
+      }
+
       const hasKey = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
-      if (hasKey && settings.autoGemini !== false) {
-        fetchGeminiPitch(lead, settings, initialLang, settings.persona || 'auto', settings.tone || 'consultative', 0)
+      if (hasKey && settings.autoGemini !== false && !savedMsg) {
+        fetchGeminiPitch(lead, settings, initialLang, effectivePersona, settings.tone || 'consultative', 0, undefined, effectiveQuery)
       }
     }
-  }, [lead, serverHasKey, fetchGeminiPitch])
+  }, [lead, effectiveQuery, serverHasKey, fetchGeminiPitch])
 
   useEffect(() => {
     const dialog = ref.current
@@ -156,20 +175,39 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
     if (!lead && dialog.open) dialog.close()
   }, [lead])
 
+  function handleMessageChange(val: string) {
+    setMessage(val)
+    if (lead?.id && typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(`sondar_custom_msg_${lead.id}`, val)
+      } catch {}
+    }
+  }
+
   function handlePersonaChange(persona: SenderPersona) {
     if (!lead) return
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(`sondar_custom_msg_${lead.id}`)
+    }
     setSelectedPersona(persona)
-    const settings = getStoredPitchSettings()
+    const currentSettings = getStoredPitchSettings()
+    const updatedSettings: PitchSettings = { ...currentSettings, persona }
+    saveStoredPitchSettings(updatedSettings)
+
+    setSavedPersonaFeedback(true)
+    setTimeout(() => setSavedPersonaFeedback(false), 2000)
+
     const nextText = generatePitch(
       lead,
-      { ...settings, persona, tone: selectedTone, language: selectedLanguage },
+      { ...updatedSettings, tone: selectedTone, language: selectedLanguage },
       variationIndex,
+      effectiveQuery,
     )
     setLocalFallback(nextText)
 
-    const hasKey = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
-    if (hasKey && settings.autoGemini !== false) {
-      fetchGeminiPitch(lead, settings, selectedLanguage, persona, selectedTone, variationIndex)
+    const hasKey = Boolean(updatedSettings.geminiApiKey?.trim() || serverHasKey)
+    if (hasKey && updatedSettings.autoGemini !== false) {
+      fetchGeminiPitch(lead, updatedSettings, selectedLanguage, persona, selectedTone, variationIndex, undefined, effectiveQuery)
     } else {
       setMessage(nextText)
       setIsAiGenerated(false)
@@ -178,18 +216,25 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
 
   function handleToneChange(tone: PitchTone) {
     if (!lead) return
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(`sondar_custom_msg_${lead.id}`)
+    }
     setSelectedTone(tone)
-    const settings = getStoredPitchSettings()
+    const currentSettings = getStoredPitchSettings()
+    const updatedSettings: PitchSettings = { ...currentSettings, tone }
+    saveStoredPitchSettings(updatedSettings)
+
     const nextText = generatePitch(
       lead,
-      { ...settings, persona: selectedPersona, tone, language: selectedLanguage },
+      { ...updatedSettings, persona: selectedPersona, tone, language: selectedLanguage },
       variationIndex,
+      effectiveQuery,
     )
     setLocalFallback(nextText)
 
-    const hasKey = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
-    if (hasKey && settings.autoGemini !== false) {
-      fetchGeminiPitch(lead, settings, selectedLanguage, selectedPersona, tone, variationIndex)
+    const hasKey = Boolean(updatedSettings.geminiApiKey?.trim() || serverHasKey)
+    if (hasKey && updatedSettings.autoGemini !== false) {
+      fetchGeminiPitch(lead, updatedSettings, selectedLanguage, selectedPersona, tone, variationIndex, undefined, effectiveQuery)
     } else {
       setMessage(nextText)
       setIsAiGenerated(false)
@@ -199,17 +244,21 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
   function handleLanguageChange(lang: PitchLanguage) {
     if (!lead) return
     setSelectedLanguage(lang)
-    const settings = getStoredPitchSettings()
+    const currentSettings = getStoredPitchSettings()
+    const updatedSettings: PitchSettings = { ...currentSettings, language: lang }
+    saveStoredPitchSettings(updatedSettings)
+
     const nextText = generatePitch(
       lead,
-      { ...settings, persona: selectedPersona, tone: selectedTone, language: lang },
+      { ...updatedSettings, persona: selectedPersona, tone: selectedTone, language: lang },
       variationIndex,
+      effectiveQuery,
     )
     setLocalFallback(nextText)
 
-    const hasKey = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
-    if (hasKey && settings.autoGemini !== false) {
-      fetchGeminiPitch(lead, settings, lang, selectedPersona, selectedTone, variationIndex)
+    const hasKey = Boolean(updatedSettings.geminiApiKey?.trim() || serverHasKey)
+    if (hasKey && updatedSettings.autoGemini !== false) {
+      fetchGeminiPitch(lead, updatedSettings, lang, selectedPersona, selectedTone, variationIndex, undefined, effectiveQuery)
     } else {
       setMessage(nextText)
       setIsAiGenerated(false)
@@ -225,12 +274,13 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
       lead,
       { ...settings, persona: selectedPersona, tone: selectedTone, language: selectedLanguage },
       nextIdx,
+      effectiveQuery,
     )
     setLocalFallback(nextText)
 
     const hasKey = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
     if (hasKey && isAiGenerated) {
-      fetchGeminiPitch(lead, settings, selectedLanguage, selectedPersona, selectedTone, nextIdx)
+      fetchGeminiPitch(lead, settings, selectedLanguage, selectedPersona, selectedTone, nextIdx, undefined, effectiveQuery)
     } else {
       setMessage(nextText)
       setIsAiGenerated(false)
@@ -248,6 +298,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
       selectedTone,
       variationIndex,
       customPrompt.trim() || undefined,
+      effectiveQuery,
     )
   }
 
@@ -261,12 +312,12 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
     : null
 
   const storedSettings = typeof window !== 'undefined' ? getStoredPitchSettings() : null
-  const baseCity = storedSettings?.senderCity || 'Videira'
+  const baseCity = storedSettings?.senderCity || ''
   const isLocal = lead ? isLeadInSameCity(lead.address, baseCity) : false
   const instagramUrl = lead?.instagram || (lead?.website && /instagram\.com/i.test(lead.website) ? lead.website : (lead?.presence === 'social' && lead.website ? lead.website : null))
   const hasInstagram = Boolean(instagramUrl)
   const googleSearchUrl = lead ? `https://www.google.com/search?q=${encodeURIComponent(`${lead.name} ${lead.address} contato telefone whatsapp instagram`)}` : ''
-  const specialty = lead ? extractSpecialtyInfo(lead) : null
+  const specialty = lead ? extractSpecialtyInfo(lead, effectiveQuery) : null
   const hasKey = Boolean(storedSettings?.geminiApiKey?.trim() || serverHasKey)
 
   return (
@@ -284,7 +335,7 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
               <div className="min-w-0 pr-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="truncate text-lg font-bold text-foreground">{lead.name}</h2>
-                  <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                  <span className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-semibold capitalize text-primary">
                     {specialty?.specialtyLabel || lead.category}
                   </span>
                 </div>
@@ -376,10 +427,10 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                     </span>
                     <div>
                       <h3 className="text-xs font-bold uppercase tracking-wider text-primary">
-                        Abordagem Adaptada para {specialty?.specialtyLabel || 'Negócios Locais'}
+                        Abordagem Adaptada para {specialty?.specialtyLabel || lead.category}
                       </h3>
                       <p className="text-[11px] text-muted-foreground">
-                        Texto 100% humanizado e direcionado às necessidades reais deste estabelecimento
+                        Texto 100% humanizado com o nome e o ramo pesquisado deste estabelecimento
                       </p>
                     </div>
                   </div>
@@ -429,22 +480,30 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                   </div>
                 </div>
 
-                {/* Seletores de Persona (Ryan / Equipe Rvll / Dev) */}
+                {/* Seletores de Persona (Ryan / Rvll / Auto / Dev Web) */}
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] font-medium text-muted-foreground">Assinatura:</span>
+                    <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                      Apresentação:
+                      {savedPersonaFeedback && (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-emerald-500/10 px-1.5 py-0.2 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20">
+                          ✓ Salvo como padrão
+                        </span>
+                      )}
+                    </span>
                     {(
                       [
-                        { id: 'auto' as SenderPersona, label: 'Auto (Adapta)' },
-                        { id: 'ryan' as SenderPersona, label: 'Ryan' },
-                        { id: 'rvll' as SenderPersona, label: 'Equipe Rvll' },
+                        { id: 'ryan' as SenderPersona, label: 'Pessoal (Ryan)' },
                         { id: 'dev' as SenderPersona, label: 'Dev Web' },
+                        { id: 'auto' as SenderPersona, label: 'Auto' },
+                        { id: 'rvll' as SenderPersona, label: 'Equipe' },
                       ] as const
                     ).map((p) => (
                       <button
                         key={p.id}
                         type="button"
                         onClick={() => handlePersonaChange(p.id)}
+                        title={`Apresentar como ${p.label} (salva como padrão para todos os leads)`}
                         className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition ${
                           selectedPersona === p.id
                             ? 'bg-primary text-primary-foreground font-semibold shadow-sm'
@@ -556,12 +615,12 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
                   <textarea
                     rows={7}
                     value={message}
-                    onChange={(e) => setMessage(e.target.value)}
+                    onChange={(e) => handleMessageChange(e.target.value)}
                     aria-label="Texto da mensagem de abordagem"
                     className="w-full resize-y rounded-xl border border-border bg-background p-3.5 font-sans text-xs leading-relaxed text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
                   />
                   <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
-                    <span>💡 Mensagem 100% adaptada ao ramo. Você pode editar qualquer palavra antes de enviar.</span>
+                    <span>💡 Mensagem 100% adaptada ao ramo pesquisado e ao nome do local. Você pode editar qualquer palavra antes de enviar.</span>
                     <span>{message.length} caracteres</span>
                   </div>
                 </div>
@@ -667,13 +726,13 @@ export function LeadDetailDialog({ lead, onClose }: Props) {
           if (lead) {
             const settings = getStoredPitchSettings()
             const initialLang = (settings.language && settings.language !== 'auto') ? settings.language : 'auto'
-            const nextText = generatePitch(lead, settings, variationIndex)
+            const nextText = generatePitch(lead, settings, variationIndex, effectiveQuery)
             setMessage(nextText)
             setLocalFallback(nextText)
 
             const hasK = Boolean(settings.geminiApiKey?.trim() || serverHasKey)
             if (hasK && settings.autoGemini !== false) {
-              fetchGeminiPitch(lead, settings, initialLang, selectedPersona, selectedTone, variationIndex)
+              fetchGeminiPitch(lead, settings, initialLang, selectedPersona, selectedTone, variationIndex, undefined, effectiveQuery)
             }
           }
         }}

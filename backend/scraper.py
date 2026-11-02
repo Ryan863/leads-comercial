@@ -70,54 +70,61 @@ def normalize_text(text: Optional[str]) -> str:
     ascii_text = nfkd.encode("ASCII", "ignore").decode("ASCII").lower()
     return re.sub(r"\s+", " ", ascii_text).strip()
 
-def detect_country(location_text: str, full_query: str = "") -> str:
-    """Detecta o país alvo a partir da localização ou da consulta."""
+def detect_country(location_text: str, full_query: str = "", explicit_country: Optional[str] = None) -> str:
+    """Detecta o país alvo a partir da localização ou da consulta com limites estritos de palavra."""
+    if explicit_country and explicit_country.lower() not in ("auto", ""):
+        return explicit_country.upper()
+
     norm = normalize_text(f"{location_text} {full_query}")
-    if any(w in norm for w in ["dubai", "emirados", "emirates", "uae", "abu dhabi", "sharjah", "ajman"]):
+
+    def has_word(word_list: List[str]) -> bool:
+        return any(bool(re.search(rf"\b{re.escape(w)}\b", norm)) for w in word_list)
+
+    if has_word(["dubai", "emirados", "emirates", "uae", "abu dhabi", "sharjah", "ajman"]):
         return "AE"
-    if any(w in norm for w in ["japao", "japan", "tokyo", "toquio", "osaka", "kyoto", "yokohama", "nagoya", "shibuya", "shinjuku"]):
+    if has_word(["japao", "japan", "tokyo", "toquio", "osaka", "kyoto", "yokohama", "nagoya", "shibuya", "shinjuku"]):
         return "JP"
-    if any(w in norm for w in ["australia", "sydney", "melbourne", "brisbane", "perth", "adelaide", "gold coast", "nsw", "vic", "qld", "tas", "act"]):
+    if has_word(["australia", "sydney", "melbourne", "brisbane", "perth", "adelaide", "gold coast", "nsw", "vic", "qld", "tas"]):
         return "AU"
-    if any(w in norm for w in [
+    if has_word([
         "usa", "eua", "united states", "miami", "new york", "los angeles", "orlando",
         "chicago", "houston", "austin", "dallas", "san francisco", "florida", "california",
-        "texas", "fl", "ca", "ny", "tx", "il", "wa", "seattle", "boston", "atlanta", "las vegas"
+        "texas", "seattle", "boston", "atlanta", "las vegas"
     ]):
         return "US"
-    if any(w in norm for w in ["uk", "united kingdom", "england", "london", "manchester", "birmingham", "liverpool", "reino unido"]):
+    if has_word(["uk", "united kingdom", "england", "london", "manchester", "birmingham", "liverpool", "reino unido"]):
         return "GB"
-    if any(w in norm for w in ["portugal", "lisboa", "porto", "coimbra", "braga", "faro", "setubal"]):
+    if has_word(["portugal", "lisboa", "porto", "coimbra", "braga", "faro", "setubal"]):
         return "PT"
-    if any(w in norm for w in ["espanha", "spain", "madrid", "barcelona", "valencia", "sevilha", "sevilla", "malaga"]):
+    if has_word(["espanha", "spain", "madrid", "barcelona", "valencia", "sevilha", "sevilla", "malaga"]):
         return "ES"
-    if any(w in norm for w in ["italia", "italy", "roma", "rome", "milano", "milan", "napoli", "firenze", "florence", "torino"]):
+    if has_word(["italia", "italy", "roma", "rome", "milano", "milan", "napoli", "firenze", "florence", "torino"]):
         return "IT"
-    if any(w in norm for w in ["alemanha", "germany", "deutschland", "berlin", "munich", "munchen", "hamburg", "frankfurt", "koln"]):
+    if has_word(["alemanha", "germany", "deutschland", "berlin", "munich", "munchen", "hamburg", "frankfurt", "koln"]):
         return "DE"
-    if any(w in norm for w in ["franca", "france", "paris", "lyon", "marseille", "bordeaux", "toulouse", "nice"]):
+    if has_word(["franca", "france", "paris", "lyon", "marseille", "bordeaux", "toulouse", "nice"]):
         return "FR"
-    if any(w in norm for w in ["suica", "switzerland", "schweiz", "suisse", "zurich", "geneva", "genebra", "basel", "bern"]):
+    if has_word(["suica", "switzerland", "schweiz", "suisse", "zurich", "geneva", "genebra", "basel", "bern"]):
         return "CH"
-    if any(w in norm for w in ["holanda", "netherlands", "paises baixos", "amsterdam", "rotterdam", "haia", "the hague", "utrecht"]):
+    if has_word(["holanda", "netherlands", "paises baixos", "amsterdam", "rotterdam", "haia", "the hague", "utrecht"]):
         return "NL"
-    if any(w in norm for w in ["irlanda", "ireland", "dublin", "cork", "galway"]):
+    if has_word(["irlanda", "ireland", "dublin", "cork", "galway"]):
         return "IE"
-    if any(w in norm for w in ["belgica", "belgium", "bruxelas", "brussels", "antwerp", "ghent"]):
+    if has_word(["belgica", "belgium", "bruxelas", "brussels", "antwerp", "ghent"]):
         return "BE"
-    if any(w in norm for w in ["suecia", "sweden", "estocolmo", "stockholm", "gothenburg", "malmo"]):
+    if has_word(["suecia", "sweden", "estocolmo", "stockholm", "gothenburg", "malmo"]):
         return "SE"
-    if any(w in norm for w in ["noruega", "norway", "oslo", "bergen", "trondheim"]):
+    if has_word(["noruega", "norway", "oslo", "bergen", "trondheim"]):
         return "NO"
-    if any(w in norm for w in ["polonia", "poland", "varsovia", "warsaw", "cracovia", "krakow", "wroclaw"]):
+    if has_word(["polonia", "poland", "varsovia", "warsaw", "cracovia", "krakow", "wroclaw"]):
         return "PL"
-    if any(w in norm for w in ["austria", "viena", "vienna", "salzburg", "graz"]):
+    if has_word(["austria", "viena", "vienna", "salzburg", "graz"]):
         return "AT"
-    if any(w in norm for w in ["canada", "toronto", "vancouver", "montreal", "calgary", "ottawa"]):
+    if has_word(["canada", "toronto", "vancouver", "montreal", "calgary", "ottawa"]):
         return "CA"
     return "BR"
 
-def parse_location_query(query: str) -> Tuple[str, str, Optional[str], str]:
+def parse_location_query(query: str, explicit_country: Optional[str] = None) -> Tuple[str, str, Optional[str], str]:
     """
     Analisa a query e extrai com precisão:
     - nicho (termo da atividade comercial)
@@ -152,14 +159,14 @@ def parse_location_query(query: str) -> Tuple[str, str, Optional[str], str]:
         niche = raw
         location_raw = ""
 
-    country = detect_country(location_raw, raw)
+    country = detect_country(location_raw, raw, explicit_country=explicit_country)
     target_state: Optional[str] = None
 
     if country == "BR":
         sub_parts = [p.strip() for p in re.split(r"[-,\s]+", normalize_text(location_raw)) if p.strip()]
         if sub_parts and sub_parts[-1] in BRAZILIAN_STATES:
             target_state = BRAZILIAN_STATES[sub_parts[-1]]
-            loc_clean = re.sub(rf"[-,\s]+\b{re.escape(sub_parts[-1])}\b\s*$", "", location_raw, flags=re.IGNORECASE).strip()
+            loc_clean = re.sub(rf"[-,\s]+\b{re.escape(sub_parts[-1])}\b\s*$", "", location_raw, flags=re.IGNORECASE).strip(" -,")
             if loc_clean:
                 location_raw = loc_clean
         elif not location_raw:
@@ -169,6 +176,16 @@ def parse_location_query(query: str) -> Tuple[str, str, Optional[str], str]:
                     return (niche, b_city, "BA", "BR")
 
     clean_city = location_raw.strip(" -,")
+    # Caso ainda reste sigla de estado no final da cidade (ex: "Curitibanos, SC" ou "Curitibanos - SC")
+    if country == "BR":
+        match_end_state = re.search(r"[-,\s]+\b([a-z]{2})\b\s*$", clean_city, flags=re.IGNORECASE)
+        if match_end_state:
+            state_key = normalize_text(match_end_state.group(1))
+            if state_key in BRAZILIAN_STATES:
+                if not target_state:
+                    target_state = BRAZILIAN_STATES[state_key]
+                clean_city = re.sub(r"[-,\s]+\b[a-z]{2}\b\s*$", "", clean_city, flags=re.IGNORECASE).strip(" -,")
+
     if not clean_city:
         clean_city = "Global"
 
@@ -189,8 +206,13 @@ def is_location_match(address: str, target_city: str, target_state: Optional[str
     if not norm_addr:
         return True
 
+    # Isola o nome puro da cidade se ainda contiver UF (ex: "curitibanos, sc" -> "curitibanos")
+    norm_city_only = re.sub(r"[-,\s]+\b[a-z]{2}\b\s*$", "", norm_city, flags=re.IGNORECASE).strip(" -,")
+    if not norm_city_only:
+        norm_city_only = norm_city
+
     if target_country != "BR":
-        city_tokens = [t for t in norm_city.split() if len(t) > 2 and t not in ("the", "and", "in", "of")]
+        city_tokens = [t for t in norm_city_only.split() if len(t) > 2 and t not in ("the", "and", "in", "of")]
         if any(t in norm_addr for t in city_tokens):
             return True
         if target_state and normalize_text(target_state) in norm_addr:
@@ -199,7 +221,7 @@ def is_location_match(address: str, target_city: str, target_state: Optional[str
         return True
 
     # 1. Correspondência direta do nome da cidade no endereço (Regra Brasileira Estrita)
-    if norm_city in norm_addr:
+    if norm_city_only in norm_addr:
         if target_state:
             norm_state = target_state.lower()
             state_match = re.search(r"[-,\s]\s*([a-z]{2})\s*,\s*\d{5}", norm_addr)
@@ -214,7 +236,7 @@ def is_location_match(address: str, target_city: str, target_state: Optional[str
     if city_uf_match:
         found_city = city_uf_match.group(1).strip()
         found_uf = city_uf_match.group(2).strip().upper()
-        if found_city and found_city != norm_city:
+        if found_city and found_city != norm_city_only:
             return False
         if target_state and found_uf != target_state.upper():
             return False
@@ -387,7 +409,7 @@ class LeadScraper:
             logger.warning("[RADAR-SCRAPER] Termo de busca vazio ou curto. Abortando.")
             return
 
-        niche, target_city, target_state, target_country = parse_location_query(clean_query)
+        niche, target_city, target_state, target_country = parse_location_query(clean_query, explicit_country=country)
         if country and country.lower() != "auto":
             target_country = country.upper()
         logger.info(f"[RADAR-SCRAPER] Localização identificada -> Nicho: '{niche}' | Cidade: '{target_city}' | UF: '{target_state or 'Auto'}' | País: '{target_country}'")
@@ -637,16 +659,21 @@ class LeadScraper:
                             except Exception:
                                 pass
 
-                            # Clica no card para abrir o painel lateral com sincronização adequada
+                            # Clica no card para abrir o painel lateral com sincronização real do título
                             try:
                                 await link_el.scroll_into_view_if_needed(timeout=1000)
                                 await link_el.click(timeout=1500)
-                                # Aguarda a renderização do painel de detalhes (título, telefone ou endereço)
-                                try:
-                                    await page.wait_for_selector('h1.DUwDvf, [data-item-id*="address"], [data-item-id*="phone"]', timeout=1500)
-                                except Exception:
-                                    pass
-                                await asyncio.sleep(0.4)
+                                for _ in range(14):
+                                    await asyncio.sleep(0.15)
+                                    try:
+                                        h1_el = page.locator("h1.DUwDvf").first
+                                        if await h1_el.is_visible(timeout=200):
+                                            h1_txt = normalize_text(await h1_el.inner_text(timeout=200))
+                                            if h1_txt and (h1_txt in norm_name or norm_name in h1_txt or h1_txt[:6] == norm_name[:6]):
+                                                break
+                                    except Exception:
+                                        pass
+                                await asyncio.sleep(0.2)
                             except Exception as click_err:
                                 logger.debug(f"[GMAPS] Aviso ao abrir detalhes do card {index} ({name}): {click_err}")
 
@@ -812,16 +839,26 @@ class LeadScraper:
         """
         snip = snippet or {}
         try:
-            # 1. Categoria
-            category = "Comércio e Serviços"
-            cat_elem = page.locator('button[jsaction*="category"], span.fontBodyMedium, button.DkEaL').first
-            try:
-                if await cat_elem.is_visible(timeout=500):
-                    txt = await cat_elem.inner_text(timeout=500)
-                    if txt and len(txt) < 50 and not any(c in txt for c in "0123456789"):
-                        category = txt.strip()
-            except Exception:
-                pass
+            # 1. Categoria: extrai do botão de categoria real do Google Maps ou usa o nicho pesquisado
+            searched_niche = self._extract_niche(original_query)
+            default_category = searched_niche.strip().title() if searched_niche and searched_niche.lower() != "business" else "Comércio Local"
+            category = default_category
+
+            cat_selectors = [
+                'button.DkEaL',
+                'button[jsaction*="pane.rating.category"]',
+                'button[jsaction*="category"]',
+            ]
+            for c_sel in cat_selectors:
+                try:
+                    cat_elem = page.locator(c_sel).first
+                    if await cat_elem.count() > 0 and await cat_elem.is_visible(timeout=300):
+                        txt = (await cat_elem.inner_text(timeout=300)).strip()
+                        if txt and 2 < len(txt) < 50 and not any(c in txt for c in "0123456789"):
+                            category = txt
+                            break
+                except Exception:
+                    continue
 
             # 2. Avaliação e Reviews legítimos
             rating: Optional[float] = snip.get("rating")
@@ -845,7 +882,7 @@ class LeadScraper:
             except Exception:
                 pass
 
-            # 3. Telefone: Extração robusta priorizando os atributos com dígitos reais
+            # 3. Telefone: Extração robusta priorizando os atributos com dígitos reais (sem contaminar com CEP/endereço)
             phone_candidates: List[str] = []
 
             # a) data-item-id contendo phone:tel: ou phone:
@@ -887,11 +924,10 @@ class LeadScraper:
             except Exception:
                 pass
 
-            # d) Elementos com tooltip de telefone/cópia com dígitos reais no texto ou aria
+            # d) Elementos com tooltip explícito de telefone (exclui copiar endereço / Plus Code)
             try:
                 tooltip_sel = (
                     'button[data-tooltip*="telefone" i], button[data-tooltip*="phone" i], '
-                    'button[data-tooltip*="copiar" i], button[data-tooltip*="copy" i], '
                     'button[data-tooltip*="call" i], button[data-tooltip*="ligar" i]'
                 )
                 for el in await page.locator(tooltip_sel).all():
@@ -904,31 +940,14 @@ class LeadScraper:
             except Exception:
                 pass
 
-            # e) Varredura complementar em botões de ação do painel
-            try:
-                for btn in await page.locator('button[data-item-id], div[data-item-id]').all():
-                    b_aria = await btn.get_attribute("aria-label") or ""
-                    b_txt = await btn.inner_text()
-                    c_txt = f"{b_aria} {b_txt}"
-                    if any(c in c_txt for c in "0123456789"):
-                        for mc in re.findall(r"\+\s*[0-9\s().-]{7,25}", c_txt):
-                            phone_candidates.append(mc)
-                        for mc in re.findall(r"(?:(?:\(?\d{1,4}\)?[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})", c_txt):
-                            digs = re.sub(r"\D", "", mc)
-                            if 8 <= len(digs) <= 15:
-                                phone_candidates.append(mc)
-            except Exception:
-                pass
-
-            # f) Snippet do card do feed se contiver número explícito
+            # e) Snippet do card do feed se contiver número explícito de telefone formatado com DDD entre parênteses ou DDI
             card_snippet_text = snip.get("card_text", "")
             if card_snippet_text:
-                for mc in re.findall(r"\+\s*[0-9\s().-]{7,25}", card_snippet_text):
+                clean_snip = re.sub(r"\b\d{5}-\d{3}\b", "", card_snippet_text)
+                for mc in re.findall(r"\+\s*[0-9\s().-]{8,20}", clean_snip):
                     phone_candidates.append(mc)
-                for mc in re.findall(r"(?:(?:\(?\d{1,4}\)?[\s.-]?)?\d{2,4}[\s.-]?\d{3,4}[\s.-]?\d{3,4})", card_snippet_text):
-                    digs = re.sub(r"\D", "", mc)
-                    if 8 <= len(digs) <= 15:
-                        phone_candidates.append(mc)
+                for mc in re.findall(r"\(\d{2,3}\)\s*\d{4,5}[-\s]\d{4}", clean_snip):
+                    phone_candidates.append(mc)
 
             regional_ddd = infer_regional_ddd(target_city, None, original_query)
             phone = ""
@@ -1092,6 +1111,8 @@ class LeadScraper:
                 "id": slug_id,
                 "name": name,
                 "category": category,
+                "searchQuery": original_query,
+                "searchedNiche": searched_niche,
                 "phone": phone,
                 "whatsapp": is_whatsapp,
                 "email": email,
@@ -1216,6 +1237,8 @@ class LeadScraper:
                     "id": slug_id,
                     "name": name,
                     "category": niche.title(),
+                    "searchQuery": f"{niche} em {city}",
+                    "searchedNiche": niche,
                     "phone": phone,
                     "whatsapp": is_whatsapp,
                     "email": tags.get("email") or tags.get("contact:email"),

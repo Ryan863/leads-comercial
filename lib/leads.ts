@@ -1,4 +1,4 @@
-import { generatePitch } from './pitch-generator'
+import { generatePitch, extractNicheFromQuery, restorePortugueseAccents } from './pitch-generator'
 
 export type WebPresence = 'none' | 'social' | 'site'
 
@@ -6,6 +6,8 @@ export type Lead = {
   id: string
   name: string
   category: string
+  searchQuery?: string
+  searchedNiche?: string
   phone: string
   whatsapp: boolean
   email: string | null
@@ -30,37 +32,96 @@ type NichePreset = {
 
 const NICHES: NichePreset[] = [
   {
-    match: /pizz/i,
-    category: ['Pizzaria', 'Restaurante & Delivery', 'Pizzaria Delivery'],
-    prefixes: ['Bella Napoli', 'Ponto Central', 'Forno di Casa', 'Don Corleone', 'Mamma Mia', 'La Piazza', 'Vulcano', 'Sabor da Serra', 'Bom Gosto', 'Dom Pepe', 'Toscana', 'Lenha Viva'],
-    suffixes: ['Pizzaria', 'Pizzaria & Forneria', 'Pizza Express', 'Hamburgueria & Pizza', 'Pizzas Artesanais'],
+    match: /sorvet|gelat|a[cç]a[ií]|picol[eé]|palet|milk\s*shake/i,
+    category: ['Sorveteria', 'Sorveteria & Açaí', 'Gelateria Artesanal'],
+    prefixes: ['Gelato D\'Oro', 'Chiquinho', 'Dolce Vita', 'Sabor da Serra', 'Polar', 'Delícia Gelada', 'Santo Gelato', 'Vila do Açaí', 'Moresco', 'Chantilly'],
+    suffixes: ['Sorvetes', 'Sorveteria', 'Gelateria', 'Sorvetes & Açaí', 'Açaí & Sorvetes'],
   },
   {
-    match: /cl[ií]nic|odont|dent|m[eé]dic/i,
-    category: ['Clínica Odontológica', 'Clínica Médica', 'Consultório'],
-    prefixes: ['Sorriso', 'Vida Plena', 'OdontoPrime', 'Bem Estar', 'Santa Clara', 'Dental Center', 'Saúde Total', 'Clinimed', 'Orthos', 'Viva Mais'],
-    suffixes: ['Clínica', 'Odontologia', 'Centro Médico', 'Saúde Integrada', 'Consultórios'],
+    match: /est[eé]tica\s*(?:automotiv|veicular|auto)|detail|polimento|vitrifica|lava\s*jato|lava\s*car|lavacar|lava[- ]r[aá]pido|martelinho/i,
+    category: ['Estética Automotiva', 'Auto Detailing & Polimento', 'Estética Veicular'],
+    prefixes: ['Studio Auto', 'Prime Detail', 'Elite Garage', 'Concept Car', 'Precision', 'Diamond', 'Maxx Detail', 'Pro Auto', 'Brilho Car', 'Apex'],
+    suffixes: ['Estética Automotiva', 'Car Detail', 'Auto Spa', 'Detailing', 'Polimento & Estética'],
   },
   {
-    match: /imobil/i,
+    match: /mec[aâ]nic|oficina|auto\s*center|centro\s*automotivo|auto\s*el[eé]trica|borracharia|funilaria|freios|suspens[aã]o/i,
+    category: ['Oficina Mecânica', 'Centro Automotivo', 'Auto Center'],
+    prefixes: ['Auto Center', 'Oficina', 'Mecânica', 'Rota', 'Torque', 'Motor Prime', 'Aliança', 'Precisão', 'Brasil Auto', ' Líder'],
+    suffixes: ['Mecânica Automotiva', 'Auto Center', 'Serviços Automotivos', 'Centro Automotivo', 'Oficina Especializada'],
+  },
+  {
+    match: /pizz|forneria/i,
+    category: ['Pizzaria', 'Pizzaria & Forneria', 'Pizzaria Delivery'],
+    prefixes: ['Bella Napoli', 'Ponto Central', 'Forno di Casa', 'Don Corleone', 'Mamma Mia', 'La Piazza', 'Vulcano', 'Sabor da Serra', 'Dom Pepe', 'Toscana'],
+    suffixes: ['Pizzaria', 'Pizzaria & Forneria', 'Pizza Express', 'Pizzas Artesanais'],
+  },
+  {
+    match: /hamburg|burger|lanche|dog/i,
+    category: ['Hamburgueria', 'Hamburgueria Artesanal', 'Lanchonete & Delivery'],
+    prefixes: ['Brutus', 'Texas', 'Smash', 'Urban', 'Garage', 'Brazuca', 'Dom', 'Viking', 'old School', 'Chef'],
+    suffixes: ['Burger', 'Hamburgueria', 'Burger & Grill', 'Burgers Artesanais'],
+  },
+  {
+    match: /padaria|confeitaria|doceria|bolo|panificadora|caf[eé]/i,
+    category: ['Padaria & Confeitaria', 'Confeitaria Artesanal', 'Cafeteria & Doceria'],
+    prefixes: ['Pão Dourado', 'Doce Sabor', 'Trigo Real', 'Villa do Pão', 'Delícias da Serra', 'Santa Clara', 'Aroma', 'Grão Nobre', 'Casa do Pão', 'Doce Arte'],
+    suffixes: ['Padaria & Confeitaria', 'Panificadora', 'Confeitaria', 'Cafeteria & Doces'],
+  },
+  {
+    match: /restaur|churrasc|sushi|gastronomia|bistr[oô]|marmit/i,
+    category: ['Restaurante', 'Restaurante & Gastronomia', 'Churrascaria & Grill'],
+    prefixes: ['Sabor & Arte', 'Cantina', 'Recanto', 'Reserva', 'Fogão da Serra', 'Vila Gastronômica', 'Tempero Nobre', 'Casa Nova', 'Bela Vista', 'Imperial'],
+    suffixes: ['Restaurante', 'Gastronomia', 'Grill & Restaurante', 'Cozinha Artesanal'],
+  },
+  {
+    match: /barbearia|barber|barbeiro/i,
+    category: ['Barbearia', 'Barber Shop'],
+    prefixes: ['Navalha', 'Dom', 'Old Jack', 'Lenhador', 'Clube da Barba', 'Gentlemen', 'Imperador', 'Sr. Bigode', 'Viking', 'Studio'],
+    suffixes: ['Barbearia', 'Barber Shop', 'Barber Club', 'Cortes & Barba'],
+  },
+  {
+    match: /sal[aã]o|cabeleir|hair|beleza|unha|manicure|lash|c[ií]lios|sobrancelha/i,
+    category: ['Salão de Beleza', 'Studio de Beleza'],
+    prefixes: ['Studio Bellas', 'Espaço Charm', 'La Belle', 'Glamour', 'Essence', 'Divas', 'Lumière', 'Bela Face', 'Aurea', 'Sublime'],
+    suffixes: ['Salão de Beleza', 'Beauty Studio', 'Hair & Nails', 'Estética & Beleza'],
+  },
+  {
+    match: /est[eé]tica|harmoniza|spa|depila|massoterap|limpeza de pele/i,
+    category: ['Clínica de Estética', 'Estética Avançada & Spa'],
+    prefixes: ['Renova', 'Pele & Corpo', 'Plenitude', 'DermaPrime', 'Essencial', 'Aura', 'Lumus', 'Bella Pelle', 'Vita', 'Harmonia'],
+    suffixes: ['Clínica de Estética', 'Estética Avançada', 'Spa & Estética', 'Harmonização'],
+  },
+  {
+    match: /odont|dent|sorriso|ortodont/i,
+    category: ['Clínica Odontológica', 'Consultório Odontológico'],
+    prefixes: ['Sorriso', 'OdontoPrime', 'Dental Center', 'Orthos', 'Oral Mais', 'Sorrir Bem', 'Implante Care', 'Brilho Dental', 'Vita Odonto', 'Unique'],
+    suffixes: ['Odontologia', 'Clínica Odontológica', 'Centro Odontológico', 'Odontologia Integrada'],
+  },
+  {
+    match: /cl[ií]nic|m[eé]dic|fisioter|psic[oó]l|nutri|sa[uú]de/i,
+    category: ['Clínica de Saúde', 'Consultório Especializado'],
+    prefixes: ['Vida Plena', 'Bem Estar', 'Santa Clara', 'Saúde Total', 'Clinimed', 'Viva Mais', 'Integrar', 'Equilíbrio', 'Vitalis', 'Aliança'],
+    suffixes: ['Clínica', 'Saúde Integrada', 'Consultórios', 'Centro de Saúde'],
+  },
+  {
+    match: /pet|veterin[aá]r|banho e tosa/i,
+    category: ['Pet Shop & Veterinária', 'Clínica Veterinária'],
+    prefixes: ['Amigo Fiel', 'Mundo Pet', 'Patas & Pelos', 'Bicho Mimado', 'VetCare', 'Alegria Pet', 'Reino Animal', 'Cão & Gato', 'Vida Pet', ' Villa Pet'],
+    suffixes: ['Pet Shop', 'Clínica Veterinária', 'Pet Center', 'Banho & Tosa'],
+  },
+  {
+    match: /imobil|corretor|im[oó]veis/i,
     category: ['Imobiliária', 'Corretora de Imóveis'],
-    prefixes: ['Lar Ideal', 'Casa Nova', 'Ilha', 'Mar Azul', 'Morada', 'Prime', 'Horizonte', 'Litoral', 'Chave de Ouro', 'Vista Mar'],
+    prefixes: ['Lar Ideal', 'Casa Nova', 'Morada', 'Prime', 'Horizonte', 'Chave de Ouro', 'Patrimônio', 'Aliança', 'Conquista', 'Realize'],
     suffixes: ['Imóveis', 'Imobiliária', 'Negócios Imobiliários', 'Corretora'],
   },
   {
-    match: /mec[aâ]n|auto|oficina|est[eé]tica|lava/i,
-    category: ['Estética Automotiva', 'Auto Spa & Detailing', 'Centro Automotivo', 'Oficina Mecânica'],
-    prefixes: ['Studio Auto', 'Prime Detail', 'Elite Garage', 'Concept Car', 'Precision', 'Turbo', 'Rota', 'Speed', 'Diamond', 'Maxx Detail'],
-    suffixes: ['Estética Automotiva', 'Car Detail', 'Auto Spa', 'Centro Automotivo', 'Detailing'],
+    match: /cabana|chal[eé]|pousada|hotel|hostel|glamping|resort|ref[uú]gio|hospedag/i,
+    category: ['Cabana & Chalé', 'Pousada', 'Hospedagem'],
+    prefixes: ['Cabana', 'Chalés', 'Refúgio', 'Recanto', 'Pousada', 'Morada', 'Vale', 'Mirante', 'Bela Vista', 'Serra Viva'],
+    suffixes: ['da Serra', 'do Vale', 'das Araucárias', 'do Lago', 'Encantado', 'Monte Belo', 'Panorama', 'da Mata'],
   },
 ]
-
-const GENERIC: NichePreset = {
-  match: /.*/,
-  category: ['Comércio Local', 'Serviços', 'Empresa Local'],
-  prefixes: ['Central', 'Nova Era', 'Estrela', 'Ponto Certo', 'Primavera', 'União', 'Real', 'Atlântico', 'Bom Jesus', 'Avenida'],
-  suffixes: ['& Cia', 'Comércio', 'Serviços', 'Store', 'Express'],
-}
 
 const DDD: Record<string, string> = {
   // Bahia
@@ -71,21 +132,21 @@ const DDD: Record<string, string> = {
   'juazeiro': '74', 'jacobina': '74',
   'ba': '71', 'bahia': '71',
   // Santa Catarina
-  'sc': '49', 'videira': '49', 'caçador': '49', 'cacador': '49', 'chapecó': '49', 'chapeco': '49',
-  'florianópolis': '48', 'florianopolis': '48', 'floripa': '48', 'joinville': '47', 'blumenau': '47',
+  'sc': '49', 'videira': '49', 'caçador': '49', 'cacador': '49', 'chapecó': '49', 'chapeco': '49', 'fraiburgo': '49', 'joaçaba': '49', 'joacaba': '49', 'curitibanos': '49', 'lages': '49',
+  'florianópolis': '48', 'florianopolis': '48', 'floripa': '48', 'criciúma': '48', 'tubarão': '48', 'joinville': '47', 'blumenau': '47', 'itajaí': '47', 'balneário camboriú': '47',
   // São Paulo
-  'sp': '11', 'são paulo': '11', 'sao paulo': '11', 'moema': '11', 'campinas': '19', 'santos': '13',
+  'sp': '11', 'são paulo': '11', 'sao paulo': '11', 'moema': '11', 'campinas': '19', 'santos': '13', 'ribeirão preto': '16', 'sorocaba': '15',
   // Rio de Janeiro
-  'rj': '21', 'rio de janeiro': '21',
+  'rj': '21', 'rio de janeiro': '21', 'niterói': '21',
   // Paraná
-  'pr': '41', 'curitiba': '41', 'londrina': '43', 'maringá': '44',
+  'pr': '41', 'curitiba': '41', 'londrina': '43', 'maringá': '44', 'cascavel': '45', 'foz do iguaçu': '45',
   // Rio Grande do Sul
-  'rs': '51', 'porto alegre': '51', 'caxias do sul': '54',
+  'rs': '51', 'porto alegre': '51', 'caxias do sul': '54', 'gramado': '54', 'passo fundo': '54',
   // Minas Gerais
-  'mg': '31', 'bh': '31', 'belo horizonte': '31', 'uberlândia': '34',
+  'mg': '31', 'bh': '31', 'belo horizonte': '31', 'uberlândia': '34', 'juiz de fora': '32',
 }
 
-const STREETS = ['Rua XV de Novembro', 'Av. Brasil', 'Rua das Flores', 'Av. Santos Dumont', 'Rua Sete de Setembro', 'Rua Marechal Deodoro', 'Av. Getúlio Vargas', 'Av. Central']
+const STREETS = ['Rua XV de Novembro', 'Av. Dom Pedro II', 'Av. Brasil', 'Rua das Flores', 'Av. Santos Dumont', 'Rua Sete de Setembro', 'Rua Marechal Deodoro', 'Av. Getúlio Vargas']
 
 function hash(input: string) {
   let h = 2166136261
@@ -114,9 +175,9 @@ function slug(text: string) {
 
 function parseCity(query: string) {
   const parts = query.split(/\s+(?:em|in|en|at)\s+/i)
-  let raw = (parts[1] ?? (query.includes('-') ? query.split('-')[1] : (query.includes(',') ? query.split(',')[1] : 'Sua Cidade'))).trim()
+  let raw = (parts[1] ?? (query.includes('-') ? query.split('-')[1] : (query.includes(',') ? query.split(',')[1] : 'Videira'))).trim()
   raw = raw.replace(/[-,\s]+\b(ba|bahia|sc|sp|rj|pr|rs|mg|ce|pe|df|fl|ca|ny|tx|nsw|vic|qld)\b.*$/i, '').trim()
-  return raw || 'Sua Cidade'
+  return raw || 'Videira'
 }
 
 function pickDDD(city: string) {
@@ -127,8 +188,30 @@ function pickDDD(city: string) {
   return String(11 + (hash(lower) % 80)).padStart(2, '0')
 }
 
+function capitalizeWords(text: string): string {
+  const smallWords = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'para', 'com', 'por', 'a', 'o'])
+  return text
+    .split(/\s+/)
+    .map((w, idx) => {
+      const lower = w.toLowerCase()
+      if (idx > 0 && smallWords.has(lower)) return lower
+      return lower.charAt(0).toUpperCase() + lower.slice(1)
+    })
+    .join(' ')
+}
+
 export function generateLeads(query: string, count: number, countryCode?: string): Lead[] {
-  const preset = NICHES.find((n) => n.match.test(query)) ?? GENERIC
+  const rawNiche = extractNicheFromQuery(query) || 'Comércio Local'
+  const formattedNiche = capitalizeWords(restorePortugueseAccents(rawNiche))
+
+  const matchedPreset = NICHES.find((n) => n.match.test(rawNiche) || n.match.test(query))
+  const preset: NichePreset = matchedPreset ?? {
+    match: /.*/,
+    category: [formattedNiche],
+    prefixes: ['Prime', 'Central', 'Nova Era', 'Estrela', 'Ponto Certo', 'Real', ' Destaque', 'Império', 'Elite', 'Aliança'],
+    suffixes: [formattedNiche],
+  }
+
   const city = parseCity(query)
   const ddd = pickDDD(city)
   const rand = rng(hash(query.toLowerCase() + count))
@@ -137,16 +220,17 @@ export function generateLeads(query: string, count: number, countryCode?: string
   const leads: Lead[] = []
 
   const c = (countryCode || '').toUpperCase()
-  const isAE = c === 'AE' || /dubai|emirados|uae|abu dhabi|sharjah/i.test(query)
-  const isJP = c === 'JP' || /japan|japão|tokyo|osaka|kyoto|yokohama|shibuya/i.test(query)
-  const isUS = c === 'US' || /miami|new york|orlando|florida|california|texas|usa|eua|fl|ca|ny|tx/i.test(query)
-  const isAU = c === 'AU' || /sydney|melbourne|brisbane|australia|austrália|nsw|vic|qld/i.test(query)
-  const isUK = c === 'GB' || c === 'UK' || /london|manchester|uk|united kingdom|england/i.test(query)
-  const isES = c === 'ES' || /madrid|barcelona|valencia|espanha|spain/i.test(query)
-  const isIT = c === 'IT' || /italia|itália|italy|roma|milano/i.test(query)
-  const isDE = c === 'DE' || /alemanha|germany|berlin|munich/i.test(query)
-  const isFR = c === 'FR' || /franca|frança|france|paris|lyon/i.test(query)
-  const isCH = c === 'CH' || /suica|suíça|switzerland|zurich|geneva/i.test(query)
+  const isBR = c === 'BR'
+  const isAE = !isBR && (c === 'AE' || /\b(dubai|emirados|uae|abu dhabi|sharjah)\b/i.test(query))
+  const isJP = !isBR && (c === 'JP' || /\b(japan|japão|tokyo|osaka|kyoto|yokohama|shibuya)\b/i.test(query))
+  const isUS = !isBR && (c === 'US' || /\b(miami|new york|orlando|florida|california|texas|usa|eua|fl|ca|ny|tx)\b/i.test(query))
+  const isAU = !isBR && (c === 'AU' || /\b(sydney|melbourne|brisbane|australia|austrália|nsw|vic|qld)\b/i.test(query))
+  const isUK = !isBR && (c === 'GB' || c === 'UK' || /\b(london|manchester|uk|united kingdom|england)\b/i.test(query))
+  const isES = !isBR && (c === 'ES' || /\b(madrid|barcelona|valencia|espanha|spain)\b/i.test(query))
+  const isIT = !isBR && (c === 'IT' || /\b(italia|itália|italy|roma|milano)\b/i.test(query))
+  const isDE = !isBR && (c === 'DE' || /\b(alemanha|germany|berlin|munich)\b/i.test(query))
+  const isFR = !isBR && (c === 'FR' || /\b(franca|frança|france|paris|lyon)\b/i.test(query))
+  const isCH = !isBR && (c === 'CH' || /\b(suica|suíça|switzerland|zurich|geneva)\b/i.test(query))
 
   const jpPrefixes = ['Sakura', 'Tokyo Craft', 'Komorebi', 'Fuji', 'Kyoto', 'Ginza', 'Shibuya', 'Hikari', 'Zenith', 'Asahi']
   const jpSuffixes = ['Studio', 'Clinic', 'Cafe & Bar', 'Dental', 'Salon', 'Kitchen', 'Design', 'Consulting']
@@ -166,9 +250,9 @@ export function generateLeads(query: string, count: number, countryCode?: string
         const s = uaeSuffixes[Math.floor(rand() * uaeSuffixes.length)]
         name = `${p} ${s}`
       } else {
-        const p = preset.prefixes[Math.floor(rand() * preset.prefixes.length)]
-        const s = preset.suffixes[Math.floor(rand() * preset.suffixes.length)]
-        name = `${p} ${s}`
+        const p = preset.prefixes[Math.floor(rand() * preset.prefixes.length)].trim()
+        const s = preset.suffixes[Math.floor(rand() * preset.suffixes.length)].trim()
+        name = p.toLowerCase().includes(s.toLowerCase()) ? p : `${p} ${s}`
       }
       if (!usedNames.has(name)) break
     }
@@ -178,7 +262,6 @@ export function generateLeads(query: string, count: number, countryCode?: string
     const presence: WebPresence = roll < 0.4 ? 'none' : roll < 0.75 ? 'social' : 'site'
     const handle = slug(name)
 
-    // Formatação de telefone conforme a região
     let phone = ''
     for (let tries = 0; tries < 25; tries++) {
       if (isAE) {
@@ -259,9 +342,11 @@ export function generateLeads(query: string, count: number, countryCode?: string
       id: `${handle}-${i}`,
       name,
       category: isJP ? 'Local Business & Studio' : preset.category[Math.floor(rand() * preset.category.length)],
+      searchQuery: query,
+      searchedNiche: formattedNiche,
       phone,
       whatsapp: Boolean(phone),
-      email: presence === 'none' && rand() > 0.5 ? null : `contact@${handle.slice(0, 18)}.com`,
+      email: presence === 'none' && rand() > 0.5 ? null : `contato@${handle.slice(0, 18)}.com.br`,
       rating: Math.round((4.2 + rand() * 0.8) * 10) / 10,
       reviews: Math.floor(20 + rand() * 400),
       open: rand() > 0.25,
@@ -269,7 +354,7 @@ export function generateLeads(query: string, count: number, countryCode?: string
       presence,
       website:
         presence === 'site'
-          ? `https://www.${handle.slice(0, 18)}.com`
+          ? `https://www.${handle.slice(0, 18)}.com.br`
           : presence === 'social'
             ? `https://instagram.com/${handle.slice(0, 22)}`
             : null,
@@ -288,11 +373,10 @@ export function generateLeads(query: string, count: number, countryCode?: string
 
 export function whatsappLink(lead: Lead, customMessage?: string) {
   let digits = lead.phone.replace(/\D/g, '')
-  // Para telefones brasileiros sem o DDI 55 explícito (10 ou 11 dígitos)
   if (!lead.phone.startsWith('+') && !digits.startsWith('55') && (digits.length === 10 || digits.length === 11)) {
     digits = `55${digits}`
   }
-  const message = customMessage ?? generatePitch(lead)
+  const message = customMessage ?? generatePitch(lead, undefined, 0, lead.searchQuery)
   const text = encodeURIComponent(message)
   return `https://wa.me/${digits}?text=${text}`
 }
@@ -300,7 +384,7 @@ export function whatsappLink(lead: Lead, customMessage?: string) {
 export function emailLink(lead: Lead, customMessage?: string) {
   if (!lead.email) return null
   const subject = `Oportunidade e Presença Digital — ${lead.name}`
-  const body = customMessage ?? generatePitch(lead)
+  const body = customMessage ?? generatePitch(lead, undefined, 0, lead.searchQuery)
   return `mailto:${lead.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
 }
 
