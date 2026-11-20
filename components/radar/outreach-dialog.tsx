@@ -71,20 +71,31 @@ export function OutreachDialog({ open, onClose, currentLeads, onStatusChange }: 
   const [configSaving, setConfigSaving] = useState(false)
   const [configSavedFeedback, setConfigSavedFeedback] = useState(false)
 
-  // Estado do WhatsApp
+  // Estado do WhatsApp (Conta 1 Principal + Conta 2 Empresa)
   const [wppStatus, setWppStatus] = useState<WhatsAppStatus | null>(null)
+  const [wppStatus2, setWppStatus2] = useState<WhatsAppStatus | null>(null)
   const [wppLoading, setWppLoading] = useState(false)
-  const [qrModalOpen, setQrModalOpen] = useState(false)
+  const [wppLoading2, setWppLoading2] = useState(false)
+  const [qrModalAccount, setQrModalAccount] = useState<1 | 2 | null>(null)
   const [clearingPending, setClearingPending] = useState(false)
+
+  // Agendamento de Horário (Manhã / Tarde) e Desligamento Automático
+  const [scheduleMode, setScheduleMode] = useState<'now' | 'scheduled'>('now')
+  const [scheduledTime, setScheduledTime] = useState('13:30')
+  const [shutdownOnComplete, setShutdownOnComplete] = useState(false)
 
   async function loadWppStatus() {
     try {
-      const wpp = await fetchWhatsAppStatus()
-      setWppStatus(wpp)
-      if (wpp.connected && qrModalOpen) {
-        setQrModalOpen(false)
+      const [wpp1, wpp2] = await Promise.all([
+        fetchWhatsAppStatus(1),
+        fetchWhatsAppStatus(2),
+      ])
+      setWppStatus(wpp1)
+      setWppStatus2(wpp2)
+      if ((qrModalAccount === 1 && wpp1.connected) || (qrModalAccount === 2 && wpp2.connected)) {
+        setQrModalAccount(null)
       }
-      return wpp
+      return { wpp1, wpp2 }
     } catch (e) {
       console.warn('Erro ao verificar WhatsApp:', e)
       return null
@@ -99,48 +110,56 @@ export function OutreachDialog({ open, onClose, currentLeads, onStatusChange }: 
       loadWppStatus()
     } else {
       dialogRef.current?.close()
-      setQrModalOpen(false)
+      setQrModalAccount(null)
     }
   }, [open])
 
-  // Polling a cada 3s enquanto o modal estiver aberto para checar status do WhatsApp
+  // Polling a cada 3s enquanto o modal estiver aberto para checar status do WhatsApp e da fila
   useEffect(() => {
     if (!open) return
 
     const interval = setInterval(async () => {
-      const wpp = await loadWppStatus()
-      if (wpp?.connected && qrModalOpen) {
-        setQrModalOpen(false)
+      await loadWppStatus()
+      try {
+        const s = await fetchOutreachStatus()
+        setStatus(s)
+        onStatusChange?.(s)
+      } catch {
+        // ignore
       }
     }, 3000)
 
     return () => clearInterval(interval)
-  }, [open, qrModalOpen])
+  }, [open, qrModalAccount])
 
-  async function handleConnectWhatsApp() {
+  async function handleConnectWhatsApp(account: 1 | 2) {
     try {
-      setWppLoading(true)
+      if (account === 1) setWppLoading(true)
+      else setWppLoading2(true)
       setActionError(null)
-      setQrModalOpen(true)
-      await connectWhatsApp()
+      setQrModalAccount(account)
+      await connectWhatsApp(account)
     } catch (err: any) {
-      setActionError(err.message || 'Falha ao solicitar conexão do WhatsApp')
-      setQrModalOpen(false)
+      setActionError(err.message || `Falha ao solicitar conexão do WhatsApp (Conta ${account})`)
+      setQrModalAccount(null)
     } finally {
-      setWppLoading(false)
+      if (account === 1) setWppLoading(false)
+      else setWppLoading2(false)
     }
   }
 
-  async function handleDisconnectWhatsApp() {
+  async function handleDisconnectWhatsApp(account: 1 | 2) {
     try {
-      setWppLoading(true)
+      if (account === 1) setWppLoading(true)
+      else setWppLoading2(true)
       setActionError(null)
-      await disconnectWhatsApp()
+      await disconnectWhatsApp(account)
       await loadWppStatus()
     } catch (err: any) {
-      setActionError(err.message || 'Falha ao desconectar WhatsApp')
+      setActionError(err.message || `Falha ao desconectar WhatsApp (Conta ${account})`)
     } finally {
-      setWppLoading(false)
+      if (account === 1) setWppLoading(false)
+      else setWppLoading2(false)
     }
   }
 
@@ -248,7 +267,15 @@ export function OutreachDialog({ open, onClose, currentLeads, onStatusChange }: 
       if (status?.is_running) {
         await stopOutreach()
       } else {
-        await startOutreach()
+        const timeToSchedule = scheduleMode === 'scheduled' ? scheduledTime : undefined
+        const res = await startOutreach(timeToSchedule, shutdownOnComplete)
+        if (res.scheduled_for) {
+          setSyncFeedback(
+            `⏰ Disparo agendado para às ${res.scheduled_for}!${
+              shutdownOnComplete ? ' Quando terminar tudo, o PC será desligado automaticamente.' : ''
+            }`,
+          )
+        }
       }
       await loadStatus()
     } catch (err: any) {
@@ -292,6 +319,10 @@ export function OutreachDialog({ open, onClose, currentLeads, onStatusChange }: 
   const pendingCount = status?.stats.pending_count || 0
   const sentToday = status?.stats.sent_today || 0
   const failedCount = status?.stats.failed_count || 0
+  const connectedAccountsCount = (wppStatus?.connected ? 1 : 0) + (wppStatus2?.connected ? 1 : 0)
+  const anyWppConnected = connectedAccountsCount > 0
+  const effectiveDailyLimit = dailyLimit * Math.max(1, connectedAccountsCount)
+  const activeQrStatus = qrModalAccount === 2 ? wppStatus2 : wppStatus
 
   return (
     <dialog
@@ -361,109 +392,105 @@ export function OutreachDialog({ open, onClose, currentLeads, onStatusChange }: 
             </div>
           )}
 
-          {/* 1. Indicador de Status do WhatsApp */}
-          <div
-            className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border p-3.5 transition-all ${
-              wppStatus?.connected
-                ? 'border-emerald-500/30 bg-emerald-500/5'
-                : 'border-destructive/30 bg-destructive/5'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <span className="relative flex size-3">
-                {wppStatus?.connected ? (
-                  <>
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex size-3 rounded-full bg-emerald-500" />
-                  </>
-                ) : (
-                  <span className="relative inline-flex size-3 rounded-full bg-destructive" />
-                )}
-              </span>
-              <span
-                className={`text-xs font-bold ${
-                  wppStatus?.connected ? 'text-emerald-500' : 'text-destructive'
+          {/* 1. Indicador de Status das 2 Contas de WhatsApp (25 + 25 = 50/dia automático) */}
+          <div className="space-y-2.5">
+            {([
+              { id: 1 as const, label: 'Conta 1 (WhatsApp Principal)', st: wppStatus, busy: wppLoading },
+              { id: 2 as const, label: 'Conta 2 (WhatsApp Empresa — opcional)', st: wppStatus2, busy: wppLoading2 },
+            ]).map((acc) => (
+              <div
+                key={acc.id}
+                className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border p-3 transition-all ${
+                  acc.st?.connected
+                    ? 'border-emerald-500/30 bg-emerald-500/5'
+                    : acc.id === 1
+                      ? 'border-destructive/30 bg-destructive/5'
+                      : 'border-border bg-card/50'
                 }`}
               >
-                {wppStatus?.connected
-                  ? 'WhatsApp Conectado (Pronto para disparar)'
-                  : 'WhatsApp Desconectado'}
-              </span>
-            </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="relative flex size-3">
+                    {acc.st?.connected ? (
+                      <>
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                        <span className="relative inline-flex size-3 rounded-full bg-emerald-500" />
+                      </>
+                    ) : (
+                      <span className={`relative inline-flex size-3 rounded-full ${acc.id === 1 ? 'bg-destructive' : 'bg-muted-foreground/40'}`} />
+                    )}
+                  </span>
+                  <div>
+                    <span className={`text-xs font-bold block ${acc.st?.connected ? 'text-emerald-500' : acc.id === 1 ? 'text-destructive' : 'text-foreground'}`}>
+                      {acc.label}: {acc.st?.connected ? 'Conectada' : 'Desconectada'}
+                    </span>
+                    {acc.id === 2 && (
+                      <span className="text-[11px] text-muted-foreground">
+                        Conecte a 2ª conta para disparar {dailyLimit} na Conta 1 + {dailyLimit} na Conta 2 automaticamente ({dailyLimit * 2}/dia).
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-            <div className="flex items-center gap-2">
-              {wppStatus?.connected ? (
-                <button
-                  type="button"
-                  onClick={handleDisconnectWhatsApp}
-                  disabled={wppLoading}
-                  className="text-xs font-semibold text-muted-foreground hover:text-destructive underline decoration-dotted transition"
-                >
-                  {wppLoading ? 'Desconectando...' : 'Desconectar'}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleConnectWhatsApp}
-                  disabled={wppLoading || wppStatus?.is_connecting}
-                  className="btn-press hover-lift inline-flex items-center gap-1.5 rounded-lg border border-primary/50 bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-sm transition hover:brightness-110 disabled:opacity-50"
-                >
-                  {wppLoading || wppStatus?.is_connecting ? (
-                    <>
-                      <Loader2 className="size-3.5 animate-spin" />
-                      <span>Abrindo Google Chrome...</span>
-                    </>
+                <div className="flex items-center gap-2 shrink-0">
+                  {acc.st?.connected ? (
+                    <button
+                      type="button"
+                      onClick={() => handleDisconnectWhatsApp(acc.id)}
+                      disabled={acc.busy}
+                      className="text-xs font-semibold text-muted-foreground hover:text-destructive underline decoration-dotted transition"
+                    >
+                      {acc.busy ? 'Desconectando...' : 'Desconectar'}
+                    </button>
                   ) : (
-                    <>
-                      <QrCode className="size-3.5" />
-                      <span>Conectar WhatsApp (Abrir Chrome)</span>
-                    </>
+                    <button
+                      type="button"
+                      onClick={() => handleConnectWhatsApp(acc.id)}
+                      disabled={acc.busy || acc.st?.is_connecting}
+                      className="btn-press hover-lift inline-flex items-center gap-1.5 rounded-lg border border-primary/50 bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-sm transition hover:brightness-110 disabled:opacity-50"
+                    >
+                      {acc.busy || acc.st?.is_connecting ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" />
+                          <span>Abrindo QR Code...</span>
+                        </>
+                      ) : (
+                        <>
+                          <QrCode className="size-3.5" />
+                          <span>Conectar Conta {acc.id}</span>
+                        </>
+                      )}
+                    </button>
                   )}
-                </button>
-              )}
-            </div>
+                </div>
+              </div>
+            ))}
           </div>
 
-          {/* 2. QR Code Renderizado Diretamente na Tela */}
-          {wppStatus?.qr_code && !wppStatus?.connected && (
+          {/* 2. QR Code Renderizado Diretamente na Tela (Conta 1 ou Conta 2) */}
+          {qrModalAccount && activeQrStatus?.qr_code && !activeQrStatus?.connected && (
             <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-primary/50 bg-card/95 p-5 text-center shadow-2xl space-y-3.5 animate-in fade-in zoom-in-95 duration-200">
               <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3.5 py-1 text-xs font-bold text-primary">
                 <QrCode className="size-4" />
-                <span>Escaneie este QR Code com o WhatsApp do Celular</span>
+                <span>Escaneie o QR Code — Conta {qrModalAccount} {qrModalAccount === 2 ? '(Empresa)' : '(Principal)'}</span>
               </div>
 
               <div className="relative rounded-2xl bg-white p-3.5 shadow-xl border-2 border-primary/30">
                 <img
-                  src={wppStatus.qr_code}
-                  alt="QR Code do WhatsApp Web"
+                  src={activeQrStatus.qr_code}
+                  alt={`QR Code WhatsApp Conta ${qrModalAccount}`}
                   className="size-56 sm:size-60 object-contain rounded-lg"
                 />
               </div>
 
-              <div className="space-y-1 text-xs text-muted-foreground max-w-sm">
-                <p className="font-semibold text-foreground">
-                  Passo a passo no seu celular:
-                </p>
-                <p>
-                  1. Abra o <b>WhatsApp</b> no celular &gt; Menu (3 pontinhos) ou <b>Configurações</b>
-                </p>
-                <p>
-                  2. Toque em <b>Aparelhos conectados</b> &gt; <b>Conectar um aparelho</b>
-                </p>
-                <p>
-                  3. Aponte a câmera para o QR Code acima.
-                </p>
-              </div>
-
               <div className="flex items-center gap-2 text-[11px] font-semibold text-primary pt-1">
                 <Loader2 className="size-3.5 animate-spin" />
-                <span>Aguardando leitura do QR Code pelo WhatsApp...</span>
+                <span>Aguardando leitura do QR Code da Conta {qrModalAccount}...</span>
               </div>
             </div>
           )}
 
           {/* 3. Alerta de geração do QR Code caso ainda esteja carregando */}
-          {qrModalOpen && !wppStatus?.qr_code && !wppStatus?.connected && (
+          {qrModalAccount && !activeQrStatus?.qr_code && !activeQrStatus?.connected && (
             <div className="relative overflow-hidden rounded-xl border border-primary/40 bg-primary/10 p-4 text-xs animate-in fade-in slide-in-from-top-2 duration-200">
               <div className="flex items-start gap-3">
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/20 text-primary">
@@ -471,19 +498,15 @@ export function OutreachDialog({ open, onClose, currentLeads, onStatusChange }: 
                 </div>
                 <div className="flex-1 space-y-1">
                   <h4 className="font-bold text-foreground">
-                    Gerando QR Code do WhatsApp Web...
+                    Gerando QR Code da Conta {qrModalAccount}...
                   </h4>
                   <p className="text-muted-foreground leading-relaxed">
-                    Iniciando sessão do WhatsApp Web. O QR Code aparecerá nesta tela em poucos segundos para você escanear com a câmera.
+                    Iniciando sessão do WhatsApp Web. O QR Code aparecerá aqui em poucos segundos.
                   </p>
-                  <div className="flex items-center gap-2 pt-1 text-[11px] font-medium text-primary">
-                    <Loader2 className="size-3 animate-spin" />
-                    <span>Conectando e capturando código QR...</span>
-                  </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setQrModalOpen(false)}
+                  onClick={() => setQrModalAccount(null)}
                   className="text-muted-foreground hover:text-foreground p-1"
                   aria-label="Dispensar aviso"
                 >
@@ -516,7 +539,7 @@ export function OutreachDialog({ open, onClose, currentLeads, onStatusChange }: 
             <div className="rounded-xl border border-border bg-card/70 p-3 text-center">
               <span className="text-[11px] font-medium text-muted-foreground">Enviados Hoje</span>
               <p className="mt-1 text-xl font-extrabold text-success">
-                {sentToday} <span className="text-xs text-muted-foreground">/ {dailyLimit}</span>
+                {sentToday} <span className="text-xs text-muted-foreground">/ {effectiveDailyLimit}</span>
               </p>
             </div>
             <div className="rounded-xl border border-border bg-card/70 p-3 text-center">
@@ -580,6 +603,110 @@ export function OutreachDialog({ open, onClose, currentLeads, onStatusChange }: 
                 Alimentar Fila ({leadsToSync.length})
               </button>
             </div>
+          </div>
+
+          {/* Bloco Novo 1: Agendar Horário de Disparo (Manhã / Tarde) */}
+          <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Clock className="size-4 text-primary" />
+                <h3 className="font-semibold text-foreground text-xs uppercase tracking-wider">
+                  Horário de Envio (Disparar de Tarde ou de Manhã)
+                </h3>
+              </div>
+              {status?.waiting_for_schedule && status?.scheduled_for && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 px-2.5 py-0.5 text-[11px] font-bold text-amber-400">
+                  <Clock className="size-3 animate-spin" />
+                  Agendado para {status.scheduled_for}
+                </span>
+              )}
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Estuda de manhã/tarde? Monte sua fila à noite e deixe agendado para o sistema enviar sozinho no horário comercial. <span className="text-amber-400 font-medium">(O PC precisa permanecer ligado — pode desligar apenas o monitor.)</span>
+            </p>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={isRunning}
+                onClick={() => setScheduleMode('now')}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition ${
+                  scheduleMode === 'now'
+                    ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                    : 'border-border bg-card text-muted-foreground hover:text-foreground'
+                } disabled:opacity-50`}
+              >
+                ⚡ Enviar Agora
+              </button>
+
+              {[
+                { label: '☀️ 09:00 (Manhã)', time: '09:00' },
+                { label: '🌤️ 13:30 (Tarde)', time: '13:30' },
+                { label: '🌤️ 15:00 (Tarde)', time: '15:00' },
+              ].map((preset) => {
+                const isSelected = scheduleMode === 'scheduled' && scheduledTime === preset.time
+                return (
+                  <button
+                    key={preset.time}
+                    type="button"
+                    disabled={isRunning}
+                    onClick={() => {
+                      setScheduleMode('scheduled')
+                      setScheduledTime(preset.time)
+                    }}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition ${
+                      isSelected
+                        ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                        : 'border-border bg-card text-muted-foreground hover:text-foreground'
+                    } disabled:opacity-50`}
+                  >
+                    {preset.label}
+                  </button>
+                )
+              })}
+
+              <div className="flex items-center gap-1.5 ml-auto">
+                <span className="text-[11px] text-muted-foreground font-medium">Outro horário:</span>
+                <input
+                  type="time"
+                  disabled={isRunning}
+                  value={scheduledTime}
+                  onChange={(e) => {
+                    setScheduledTime(e.target.value)
+                    setScheduleMode('scheduled')
+                  }}
+                  className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-bold text-foreground"
+                />
+              </div>
+            </div>
+
+            {status?.waiting_for_schedule && status?.scheduled_for && (
+              <div className="flex items-center justify-between rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                <span>
+                  ⏳ O computador está com <b>Keep-Awake ativo</b> (pode desligar a tela do monitor). Os disparos vão começar sozinhos às <b>{status.scheduled_for}</b>!
+                </span>
+                {status.countdown_seconds != null && (
+                  <span className="font-mono font-bold shrink-0 ml-2">
+                    {Math.floor(status.countdown_seconds / 3600)}h {Math.floor((status.countdown_seconds % 3600) / 60)}m
+                  </span>
+                )}
+              </div>
+            )}
+            {/* Checkbox: Desligar PC automaticamente ao terminar */}
+            <label className="flex items-center gap-2.5 pt-2 border-t border-primary/20 cursor-pointer select-none text-xs">
+              <input
+                type="checkbox"
+                disabled={isRunning}
+                checked={shutdownOnComplete}
+                onChange={(e) => setShutdownOnComplete(e.target.checked)}
+                className="rounded border-border accent-primary size-4"
+              />
+              <span className="text-foreground">
+                <b>🔌 Desligar o PC automaticamente ao terminar todos os disparos</b>{' '}
+                <span className="text-muted-foreground">(aguarda 60s após o último envio e desliga o Windows)</span>
+              </span>
+            </label>
           </div>
 
           {/* Bloco 2: Governança de Cadência e Sliders de Segurança */}
@@ -795,17 +922,26 @@ export function OutreachDialog({ open, onClose, currentLeads, onStatusChange }: 
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-border p-5 bg-card/60">
           <div className="text-xs text-muted-foreground text-center sm:text-left">
             {isRunning ? (
-              <span className="text-success font-medium flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-success animate-ping" />
-                Fila rodando ativamente em segundo plano
-              </span>
-            ) : !wppStatus?.connected ? (
+              status?.waiting_for_schedule && status?.scheduled_for ? (
+                <span className="text-amber-400 font-medium flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-amber-400 animate-ping" />
+                  Aguardando horário agendado ({status.scheduled_for}) para iniciar os disparos
+                </span>
+              ) : (
+                <span className="text-success font-medium flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-success animate-ping" />
+                  Fila rodando ativamente em segundo plano
+                </span>
+              )
+            ) : !anyWppConnected ? (
               <span className="text-destructive font-medium flex items-center gap-1.5">
                 <span className="size-2 rounded-full bg-destructive" />
-                Conecte o WhatsApp acima para habilitar o envio seguro
+                Conecte pelo menos uma conta do WhatsApp acima para habilitar o envio
               </span>
             ) : pendingCount > 0 ? (
-              <span className="text-foreground">Pronto para iniciar com <b>{pendingCount}</b> leads pendentes.</span>
+              <span className="text-foreground">
+                Pronto para {scheduleMode === 'scheduled' ? `agendar (${scheduledTime})` : 'iniciar'} com <b>{pendingCount}</b> leads pendentes.
+              </span>
             ) : (
               <span>Adicione leads à fila para começar.</span>
             )}
@@ -828,18 +964,24 @@ export function OutreachDialog({ open, onClose, currentLeads, onStatusChange }: 
                 className="btn-press hover-lift flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 rounded-xl border border-destructive/50 bg-destructive text-destructive-foreground px-5 py-2.5 text-xs font-bold shadow-lg transition hover:brightness-110"
               >
                 {loading ? <Loader2 className="size-4 animate-spin" /> : <Pause className="size-4" />}
-                Interromper Fila
+                {status?.waiting_for_schedule ? 'Cancelar Agendamento' : 'Interromper Fila'}
               </button>
             ) : (
               <button
                 type="button"
                 onClick={handleToggleQueue}
-                disabled={loading || pendingCount === 0 || !wppStatus?.connected}
-                title={!wppStatus?.connected ? 'Conecte o WhatsApp para iniciar a fila' : undefined}
+                disabled={loading || pendingCount === 0 || !anyWppConnected}
+                title={!anyWppConnected ? 'Conecte o WhatsApp para iniciar a fila' : undefined}
                 className="btn-press hover-lift flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 rounded-xl bg-success text-background px-6 py-2.5 text-xs font-extrabold shadow-lg shadow-success/20 transition hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {loading ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4 fill-current" />}
-                Iniciar Fila Segura
+                {loading ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : scheduleMode === 'scheduled' ? (
+                  <Clock className="size-4" />
+                ) : (
+                  <Play className="size-4 fill-current" />
+                )}
+                {scheduleMode === 'scheduled' ? `Agendar Disparo (${scheduledTime})` : 'Iniciar Fila Segura'}
               </button>
             )}
           </div>

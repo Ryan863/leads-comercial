@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import database as db
-from adapters.whatsapp_driver import whatsapp_driver
+from adapters.whatsapp_driver import get_whatsapp_driver
 from outreach_worker import outreach_worker
 
 logger = logging.getLogger("OutreachRouter")
@@ -60,13 +60,19 @@ async def get_outreach_status():
 
 
 @router.post("/start")
-async def start_outreach():
+async def start_outreach(
+    scheduled_time: Optional[str] = Query(None, description="Horário agendado opcional HH:MM (ex: 13:30)"),
+    shutdown_on_complete: bool = Query(False, description="Desligar o PC automaticamente ao terminar os disparos"),
+):
     """
     Inicia o worker de disparo autônomo em segundo plano com regras estritas de segurança,
-    prevenção de suspensão do Windows (keep_awake) e intervalos variáveis.
+    prevenção de suspensão do Windows (keep_awake), agendamento, 2 contas e desligamento opcional.
     """
-    result = await outreach_worker.start()
-    if result.get("status") in ("limit_reached", "queue_empty"):
+    result = await outreach_worker.start(
+        scheduled_time=scheduled_time,
+        shutdown_on_complete=shutdown_on_complete,
+    )
+    if result.get("status") in ("limit_reached", "queue_empty", "invalid_schedule"):
         raise HTTPException(status_code=400, detail=result.get("message"))
     return result
 
@@ -138,45 +144,50 @@ async def clear_outreach_queue(only_pending: bool = Query(True)):
 
 
 @router.get("/whatsapp/status")
-async def get_whatsapp_status():
+async def get_whatsapp_status(account: int = Query(1, ge=1, le=2)):
     """
-    Retorna {"connected": true/false} verificando rapidamente a existência e a validade da sessão salva.
-    Inclui qr_code em base64 para exibição direta no frontend durante a conexão.
+    Retorna status da Conta 1 (Principal) ou Conta 2 (Empresa) do WhatsApp Web.
     """
-    connected = await whatsapp_driver.is_logged_in()
+    drv = get_whatsapp_driver(account)
+    connected = await drv.is_logged_in()
     return {
+        "account": account,
         "connected": connected,
-        "is_connecting": whatsapp_driver.is_connecting,
-        "qr_code": whatsapp_driver.current_qr_code if not connected else None,
-        "status": "connected" if connected else ("connecting" if whatsapp_driver.is_connecting else "disconnected")
+        "is_connecting": drv.is_connecting,
+        "qr_code": drv.current_qr_code if not connected else None,
+        "status": "connected" if connected else ("connecting" if drv.is_connecting else "disconnected"),
     }
 
 
 @router.post("/whatsapp/connect")
-async def connect_whatsapp():
+async def connect_whatsapp(account: int = Query(1, ge=1, le=2)):
     """
-    Dispara a abertura da janela com open_for_qr_code() em segundo plano para o usuário autenticar.
+    Abre o QR Code para autenticação da Conta 1 (Principal) ou Conta 2 (Empresa).
     """
-    if whatsapp_driver.is_connecting:
+    drv = get_whatsapp_driver(account)
+    if drv.is_connecting:
         return {
             "success": True,
+            "account": account,
             "status": "already_connecting",
-            "message": "Uma janela do navegador já está aberta aguardando leitura do QR Code."
+            "message": "Uma janela do navegador já está aberta aguardando leitura do QR Code.",
         }
 
-    asyncio.create_task(whatsapp_driver.open_for_qr_code())
+    asyncio.create_task(drv.open_for_qr_code())
     return {
         "success": True,
+        "account": account,
         "status": "connecting",
-        "message": "Janela do navegador aberta. Aponte a câmera do celular no WhatsApp > Aparelhos Conectados e leia o QR Code."
+        "message": f"Conectando Conta {account}: aponte a câmera do celular no WhatsApp > Aparelhos Conectados e leia o QR Code.",
     }
 
 
 @router.post("/whatsapp/disconnect")
-async def disconnect_whatsapp():
+async def disconnect_whatsapp(account: int = Query(1, ge=1, le=2)):
     """
-    Limpa a pasta .wpp_session, permitindo trocar de número ou reiniciar a conexão.
+    Desconecta e limpa a sessão da Conta 1 ou Conta 2.
     """
-    return await whatsapp_driver.disconnect()
+    drv = get_whatsapp_driver(account)
+    return await drv.disconnect()
 
 

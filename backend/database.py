@@ -199,10 +199,14 @@ def sync_leads(raw_leads: List[Dict[str, Any]]) -> Tuple[int, int]:
             company_name = (item.get("name") or item.get("company_name") or "").strip()
             city = (item.get("city") or "").strip()
             if not city and item.get("address"):
-                # Tenta extrair cidade do endereço
-                parts = [p.strip() for p in item["address"].split("-") if p.strip()]
-                if len(parts) >= 2:
-                    city = parts[-2]
+                addr_clean = re.sub(r"\b\d{5}-?\d{3}\b", "", item["address"]).strip()
+                m_city = re.search(
+                    r"(?:[-—,]\s*)([A-Za-zÀ-ú][A-Za-zÀ-ú\s]{2,28}?)\s*(?:[-–—]\s*|,\s*)(?:AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b",
+                    addr_clean,
+                    re.IGNORECASE,
+                )
+                if m_city:
+                    city = m_city.group(1).strip()
 
             niche = (item.get("searchedNiche") or item.get("category") or item.get("niche") or "").strip()
             

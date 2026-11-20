@@ -2,11 +2,13 @@ import asyncio
 import datetime
 import logging
 import random
+import subprocess
+import sys
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional
 
 import database as db
-from adapters.whatsapp_driver import WhatsAppDriver, whatsapp_driver
+from adapters.whatsapp_driver import WhatsAppDriver, whatsapp_driver, whatsapp_driver_2
 from keep_awake import keep_awake
 from message_generator import generate_outreach_message
 from telegram_notifier import TelegramNotifier
@@ -28,6 +30,8 @@ class OutreachWorker:
 
     def __init__(self, driver: Optional[WhatsAppDriver] = None):
         self.driver = driver or whatsapp_driver
+        self.driver_2 = whatsapp_driver_2
+        self.active_account: int = 1
         self.is_running = False
         self._stop_requested = False
         self._task: Optional[asyncio.Task] = None
@@ -36,6 +40,10 @@ class OutreachWorker:
         self.countdown_seconds: Optional[int] = None
         self.batch_sent_count = 0
         self.started_at: Optional[str] = None
+        self.scheduled_for: Optional[str] = None
+        self.waiting_for_schedule: bool = False
+        self._scheduled_target_dt: Optional[datetime.datetime] = None
+        self.shutdown_on_complete: bool = False
 
         # Histórico de logs em memória para acompanhamento em tempo real no frontend
         self.logs: Deque[Dict[str, Any]] = deque(maxlen=100)
@@ -59,17 +67,37 @@ class OutreachWorker:
             chat_id=config.get("telegram_chat_id"),
         )
 
-    async def start(self) -> Dict[str, Any]:
-        """Inicia o worker de disparo em segundo plano."""
+    async def start(self, scheduled_time: Optional[str] = None, shutdown_on_complete: bool = False) -> Dict[str, Any]:
+        """Inicia o worker de disparo em segundo plano (imediatamente ou agendado para HH:MM, com desligamento opcional)."""
         if self.is_running:
             return {"status": "already_running", "message": "O worker já está em execução."}
 
         config = db.get_config()
-        daily_limit = config.get("daily_limit", 25)
+        limit_per_account = config.get("daily_limit", 25)
+        acc1_ready = await self.driver.is_logged_in()
+        acc2_ready = await self.driver_2.is_logged_in()
+        connected_accounts = (1 if acc1_ready else 0) + (1 if acc2_ready else 0)
+        effective_daily_limit = limit_per_account * max(1, connected_accounts)
         sent_today = db.get_daily_sent_count()
 
-        if sent_today >= daily_limit:
-            msg = f"Limite diário de {daily_limit} mensagens já foi atingido hoje ({sent_today} enviadas)."
+        target_dt: Optional[datetime.datetime] = None
+        clean_sched = (scheduled_time or "").strip()
+        if clean_sched:
+            try:
+                parts = clean_sched.split(":")
+                hour, minute = int(parts[0]), int(parts[1])
+                now = datetime.datetime.now()
+                candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                if candidate <= now:
+                    candidate += datetime.timedelta(days=1)
+                target_dt = candidate
+            except Exception:
+                return {"status": "invalid_schedule", "message": "Horário de agendamento inválido. Use o formato HH:MM."}
+
+        # Se for iniciar agora (ou agendado para hoje mesmo), valida limite diário total das contas conectadas
+        is_for_tomorrow = bool(target_dt and target_dt.date() > datetime.datetime.now().date())
+        if not is_for_tomorrow and sent_today >= effective_daily_limit:
+            msg = f"Limite diário de {effective_daily_limit} mensagens já foi atingido hoje ({sent_today} enviadas). Dica: você pode agendar para amanhã de manhã ou de tarde!"
             self.log("warning", msg)
             return {"status": "limit_reached", "message": msg}
 
@@ -83,29 +111,53 @@ class OutreachWorker:
         self._stop_requested = False
         self.batch_sent_count = 0
         self.started_at = datetime.datetime.now().isoformat()
+        self._scheduled_target_dt = target_dt
+        self.scheduled_for = target_dt.strftime("%H:%M") if target_dt else None
+        self.waiting_for_schedule = bool(target_dt)
+        self.shutdown_on_complete = bool(shutdown_on_complete)
+        self.active_account = 1 if acc1_ready else 2
         db.set_running_state(True)
 
         # 1. Ativa a proteção do Windows contra suspensão/hibernação
         keep_awake.enable()
         self.log("info", "Prevenção de suspensão do Windows ativada (Modo Autônomo).")
+        if self.shutdown_on_complete:
+            self.log("info", "🔌 Desligamento automático do PC ativado: o Windows será desligado quando a fila terminar.")
+        if acc1_ready and acc2_ready:
+            self.log("info", f"📱📱 Modo 2 Contas ativo! Enviará {limit_per_account} na Conta 1 + {limit_per_account} na Conta 2 (Total: {effective_daily_limit}/dia).")
 
-        # 2. Notificação remota no Telegram (se configurado)
-        stats = db.get_stats()
-        notifier = self.get_notifier(config)
-        asyncio.create_task(
-            notifier.notify_queue_started(
-                total_leads=stats.get("pending_count", 0),
-                min_delay=config.get("min_delay_seconds", 70),
-                max_delay=config.get("max_delay_seconds", 190),
-                daily_limit=daily_limit,
+        if target_dt:
+            day_label = "amanhã" if is_for_tomorrow else "hoje"
+            self.log(
+                "info",
+                f"⏰ Disparo agendado para {day_label} às {self.scheduled_for}! O PC ficará acordado e iniciará automaticamente no horário.",
             )
-        )
-
-        self.log("info", f"Fila de disparo iniciada! Limite diário: {daily_limit} | Enviados hoje: {sent_today}")
+        else:
+            # 2. Notificação remota no Telegram (se configurado)
+            stats = db.get_stats()
+            notifier = self.get_notifier(config)
+            asyncio.create_task(
+                notifier.notify_queue_started(
+                    total_leads=stats.get("pending_count", 0),
+                    min_delay=config.get("min_delay_seconds", 70),
+                    max_delay=config.get("max_delay_seconds", 190),
+                    daily_limit=effective_daily_limit,
+                )
+            )
+            self.log("info", f"Fila de disparo iniciada! Limite diário: {effective_daily_limit} | Enviados hoje: {sent_today}")
 
         # 3. Cria a tarefa assíncrona principal
         self._task = asyncio.create_task(self._run_loop())
-        return {"status": "started", "message": "Fila de disparo iniciada com sucesso em segundo plano."}
+        return {
+            "status": "scheduled" if target_dt else "started",
+            "scheduled_for": self.scheduled_for,
+            "shutdown_on_complete": self.shutdown_on_complete,
+            "message": (
+                f"Disparo agendado com sucesso para às {self.scheduled_for}."
+                if target_dt
+                else "Fila de disparo iniciada com sucesso em segundo plano."
+            ),
+        }
 
     async def stop(self) -> Dict[str, Any]:
         """Sinaliza ao worker para encerrar as operações com segurança."""
@@ -122,24 +174,84 @@ class OutreachWorker:
         return {"status": "stopping", "message": "Parando fila de disparo..."}
 
     async def _run_loop(self):
-        """Loop principal do worker com governança e resiliência a falhas."""
+        """Loop principal do worker com governança, agendamento e resiliência a falhas."""
         try:
+            # Se houver agendamento futuro (ex: agendou à noite para disparar às 09:00 ou 13:30), aguarda o horário
+            if self._scheduled_target_dt:
+                while not self._stop_requested:
+                    now = datetime.datetime.now()
+                    diff = int((self._scheduled_target_dt - now).total_seconds())
+                    if diff <= 0:
+                        break
+                    self.waiting_for_schedule = True
+                    self.countdown_seconds = diff
+                    await asyncio.sleep(1.0)
+
+                self.waiting_for_schedule = False
+                self.countdown_seconds = None
+                if self._stop_requested:
+                    return
+
+                self.log("info", f"⏰ Horário agendado ({self.scheduled_for}) chegou! Iniciando disparos automaticamente...")
+                self.scheduled_for = None
+                self._scheduled_target_dt = None
+
+                # Avisa no Telegram que o disparo agendado começou
+                cfg_now = db.get_config()
+                stats_now = db.get_stats()
+                asyncio.create_task(
+                    self.get_notifier(cfg_now).notify_queue_started(
+                        total_leads=stats_now.get("pending_count", 0),
+                        min_delay=cfg_now.get("min_delay_seconds", 70),
+                        max_delay=cfg_now.get("max_delay_seconds", 190),
+                        daily_limit=cfg_now.get("daily_limit", 25),
+                    )
+                )
+
+            completed_naturally = False
+
             while not self._stop_requested:
                 config = db.get_config()
-                daily_limit = config.get("daily_limit", 25)
+                limit_per_account = config.get("daily_limit", 25)
                 min_delay = config.get("min_delay_seconds", 70)
                 max_delay = config.get("max_delay_seconds", 190)
 
-                # Regra 1: Governança rígida de volume diário
+                acc1_ready = await self.driver.is_logged_in()
+                acc2_ready = await self.driver_2.is_logged_in()
+                connected_accounts = (1 if acc1_ready else 0) + (1 if acc2_ready else 0)
+                effective_daily_limit = limit_per_account * max(1, connected_accounts)
+
+                # Regra 1: Governança rígida de volume diário (suporta 25 na Conta 1 + 25 na Conta 2)
                 sent_today = db.get_daily_sent_count()
-                if sent_today >= daily_limit:
+                if sent_today >= effective_daily_limit:
                     self.log(
                         "warning",
-                        f"🛑 Limite diário alcançado ({sent_today}/{daily_limit}). Encerrando fila por segurança.",
+                        f"🛑 Limite diário alcançado ({sent_today}/{effective_daily_limit}). Encerrando fila por segurança.",
                     )
                     notifier = self.get_notifier(config)
-                    await notifier.notify_daily_limit_reached(sent_today=sent_today, daily_limit=daily_limit)
+                    await notifier.notify_daily_limit_reached(sent_today=sent_today, daily_limit=effective_daily_limit)
+                    completed_naturally = True
                     break
+
+                # Seleção automática da conta ativa (Conta 1 até limit_per_account, depois troca para Conta 2)
+                if acc1_ready and acc2_ready:
+                    desired_account = 1 if sent_today < limit_per_account else 2
+                    if desired_account != self.active_account:
+                        self.log(
+                            "info",
+                            f"🔄 Meta de {limit_per_account} mensagens na Conta 1 atingida! Trocando automaticamente para a Conta 2 (Empresa)...",
+                        )
+                        try:
+                            await self.driver.close()
+                        except Exception:
+                            pass
+                        self.active_account = desired_account
+                elif acc2_ready and not acc1_ready:
+                    self.active_account = 2
+                else:
+                    self.active_account = 1
+
+                active_driver = self.driver_2 if self.active_account == 2 else self.driver
 
                 # Regra 2: Busca o próximo lead pendente
                 lead = db.get_next_pending_lead()
@@ -147,6 +259,7 @@ class OutreachWorker:
                     self.log("info", "🏁 Todos os leads da fila foram processados!")
                     notifier = self.get_notifier(config)
                     await notifier.notify_queue_completed(sent_today=sent_today)
+                    completed_naturally = True
                     break
 
                 self.current_lead = lead
@@ -157,7 +270,8 @@ class OutreachWorker:
 
                 # Marca como em processamento (queued)
                 db.update_lead_status(lead_id, "queued")
-                self.log("info", f"Preparando envio para: {company} ({phone}) em {city}...")
+                acc_label = "Conta 2 (Empresa)" if self.active_account == 2 else "Conta 1"
+                self.log("info", f"[{acc_label}] Preparando envio para: {company} ({phone}) em {city}...")
 
                 # Regra 3: Geração dinâmica de texto com Spintax e preferência para texto adaptado
                 custom_msg = (lead.get("custom_message") or "").strip()
@@ -167,9 +281,9 @@ class OutreachWorker:
                 else:
                     message = generate_outreach_message(lead)
 
-                # Regra 4: Disparo via WhatsAppDriver.send_direct_message() com isolamento de erros
+                # Regra 4: Disparo via WhatsAppDriver ativo com isolamento de erros
                 try:
-                    result = await self.driver.send_direct_message(phone=phone, message=message)
+                    result = await active_driver.send_direct_message(phone=phone, message=message)
                     success = bool(result.get("success"))
                     error_reason = result.get("error")
                 except Exception as exc:
@@ -191,8 +305,8 @@ class OutreachWorker:
                     sent_today += 1
                     self.log(
                         "success",
-                        f"✅ Mensagem enviada com sucesso para {company} ({phone})!",
-                        meta={"lead_id": lead_id, "phone": phone, "company": company},
+                        f"✅ [{acc_label}] Mensagem enviada com sucesso para {company} ({phone})!",
+                        meta={"lead_id": lead_id, "phone": phone, "company": company, "account": self.active_account},
                     )
 
                     # Alerta periódico no Telegram a cada 5 envios
@@ -201,7 +315,7 @@ class OutreachWorker:
                         notifier = self.get_notifier(config)
                         await notifier.notify_progress(
                             sent_today=sent_today,
-                            daily_limit=daily_limit,
+                            daily_limit=effective_daily_limit,
                             pending=stats.get("pending_count", 0),
                             last_company=company,
                             last_phone=phone,
@@ -225,7 +339,7 @@ class OutreachWorker:
 
                 # Checa se ainda há leads e se o limite diário não foi atingido
                 remaining_pending = db.get_next_pending_lead()
-                if not remaining_pending or sent_today >= daily_limit or self._stop_requested:
+                if not remaining_pending or sent_today >= effective_daily_limit or self._stop_requested:
                     continue
 
                 # Regra 5: Intervalo aleatório com Jitter (PROIBIDO INTERVALO FIXO)
@@ -250,19 +364,40 @@ class OutreachWorker:
             logger.error(f"[WORKER CRITICAL] Erro inesperado no loop principal: {exc}", exc_info=True)
             self.log("error", f"Erro crítico no loop de disparo: {str(exc)}")
         finally:
+            should_shutdown = self.shutdown_on_complete and completed_naturally and not self._stop_requested
             self.is_running = False
             self._stop_requested = False
             self.current_lead = None
             self.countdown_seconds = None
+            self.scheduled_for = None
+            self.waiting_for_schedule = False
+            self._scheduled_target_dt = None
+            self.shutdown_on_complete = False
             db.set_running_state(False)
 
-            # Restaura o gerenciamento de energia normal do Windows
             keep_awake.disable()
-            try:
-                await self.driver.close()
-            except Exception:
-                pass
+            for drv in (self.driver, self.driver_2):
+                try:
+                    await drv.close()
+                except Exception:
+                    pass
             self.log("info", "Fila de disparo finalizada. Estado do PC restaurado.")
+
+            if should_shutdown and sys.platform == "win32":
+                self.log("warning", "🔌 Todos os disparos foram concluídos! Desligando o PC automaticamente em 60 segundos...")
+                try:
+                    subprocess.Popen(
+                        [
+                            "shutdown",
+                            "/s",
+                            "/t",
+                            "60",
+                            "/c",
+                            "Sondar: Todos os disparos foram concluídos! Desligando o PC em 60 segundos.",
+                        ]
+                    )
+                except Exception as exc:
+                    logger.error(f"[SHUTDOWN] Falha ao agendar desligamento do Windows: {exc}")
 
     def get_status(self) -> Dict[str, Any]:
         """Retorna o estado detalhado do worker e métricas atuais."""
@@ -273,6 +408,10 @@ class OutreachWorker:
             "is_running": self.is_running,
             "stop_requested": self._stop_requested,
             "started_at": self.started_at,
+            "scheduled_for": self.scheduled_for,
+            "waiting_for_schedule": self.waiting_for_schedule,
+            "shutdown_on_complete": self.shutdown_on_complete,
+            "active_account": self.active_account,
             "keep_awake_active": keep_awake.is_active,
             "countdown_seconds": self.countdown_seconds,
             "batch_sent_count": self.batch_sent_count,

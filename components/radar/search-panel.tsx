@@ -1,6 +1,59 @@
 'use client'
 
-import { Building2, Coffee, Globe, Loader2, Pizza, Search, Stethoscope, UtensilsCrossed, Zap } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, Building2, Clock, Coffee, Globe, History, Loader2, Pizza, Search, Stethoscope, Trash2, UtensilsCrossed, X, Zap } from 'lucide-react'
+
+const HISTORY_STORAGE_KEY = 'sondar_search_history_v1'
+
+export type SearchHistoryItem = {
+  id: string
+  query: string
+  normalized: string
+  date: string
+}
+
+function normalizeForHistory(text: string): string {
+  return (text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\b(?:em|na|no|de|da|do|sc|sp|pr|rs|mg|rj|ba|ce|pe|df|go|es|mt|ms|am|pa)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function loadHistory(): SearchHistoryItem[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(HISTORY_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function saveHistory(items: SearchHistoryItem[]) {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(items.slice(0, 100)))
+  } catch {
+    // ignore
+  }
+}
+
+function formatHistoryDate(iso: string): string {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) +
+      ' às ' +
+      d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
 
 export type CountryOption = {
   code: string
@@ -67,12 +120,66 @@ export function SearchPanel({
   onScan,
 }: Props) {
   const selectedCountry = COUNTRIES.find((c) => c.code === country) || COUNTRIES[0]
+  const [history, setHistory] = useState<SearchHistoryItem[]>([])
+
+  useEffect(() => {
+    setHistory(loadHistory())
+  }, [])
+
+  function recordSearch(term: string) {
+    const clean = term.trim()
+    if (!clean) return
+    const norm = normalizeForHistory(clean)
+    if (!norm) return
+
+    setHistory((prev) => {
+      const filtered = prev.filter((item) => item.normalized !== norm)
+      const next: SearchHistoryItem[] = [
+        { id: `${Date.now()}`, query: clean, normalized: norm, date: new Date().toISOString() },
+        ...filtered,
+      ].slice(0, 100)
+      saveHistory(next)
+      return next
+    })
+  }
+
+  function removeHistoryItem(id: string) {
+    setHistory((prev) => {
+      const next = prev.filter((item) => item.id !== id)
+      saveHistory(next)
+      return next
+    })
+  }
+
+  function clearAllHistory() {
+    setHistory([])
+    saveHistory([])
+  }
+
+  // Detecta em tempo real se o nicho + cidade digitado já está no histórico
+  const matchedHistory = useMemo(() => {
+    const normInput = normalizeForHistory(query)
+    if (normInput.length < 4) return null
+    return (
+      history.find((item) => {
+        if (item.normalized === normInput) return true
+        // Verifica correspondência de todas as palavras relevantes (ex: "odontologia chapeco" bate com "odontologia em chapeco - sc")
+        const inputWords = normInput.split(' ').filter((w) => w.length >= 3)
+        const itemWords = item.normalized.split(' ').filter((w) => w.length >= 3)
+        if (inputWords.length >= 2 && itemWords.length >= 2) {
+          return inputWords.every((w) => itemWords.some((iw) => iw.includes(w) || w.includes(iw)))
+        }
+        return false
+      }) || null
+    )
+  }, [query, history])
 
   return (
     <form
       className="rounded-2xl border border-border bg-card/70 p-5 backdrop-blur shadow-lg shadow-black/5"
       onSubmit={(e) => {
         e.preventDefault()
+        recordSearch(query)
         onScan()
       }}
     >
@@ -161,6 +268,72 @@ export function SearchPanel({
         </button>
       </div>
 
+      {/* Alerta instantâneo quando o nicho/cidade digitado já foi pesquisado antes */}
+      {matchedHistory && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-300 animate-in fade-in duration-150">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="size-4 shrink-0 text-amber-400" aria-hidden="true" />
+            <span>
+              <b>Você já pesquisou esse nicho:</b> &ldquo;{matchedHistory.query}&rdquo;{' '}
+              <span className="text-amber-200/80">(em {formatHistoryDate(matchedHistory.date)})</span>
+            </span>
+          </div>
+          <span className="text-[11px] text-amber-200/75">
+            Se quiser pesquisar de novo mesmo assim, basta clicar em Iniciar Varredura.
+          </span>
+        </div>
+      )}
+
+      {/* Histórico de Nichos Pesquisados */}
+      {history.length > 0 && (
+        <div className="mt-4 border-t border-border/70 pt-3.5">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+              <History className="size-3.5 text-primary" aria-hidden="true" />
+              Histórico de Nichos Pesquisados ({history.length})
+            </span>
+            <button
+              type="button"
+              onClick={clearAllHistory}
+              className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition hover:text-destructive"
+            >
+              <Trash2 className="size-3" aria-hidden="true" />
+              Limpar histórico
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 max-h-24 overflow-y-auto pr-1">
+            {history.map((item) => (
+              <div
+                key={item.id}
+                className="inline-flex items-center gap-1 rounded-full border border-border bg-background/70 pl-2.5 pr-1.5 py-1 text-xs transition hover:border-primary/50"
+              >
+                <button
+                  type="button"
+                  disabled={scanning}
+                  onClick={() => {
+                    onQueryChange(item.query)
+                  }}
+                  title={`Pesquisado em ${formatHistoryDate(item.date)} — clique para preencher`}
+                  className="inline-flex items-center gap-1.5 text-foreground hover:text-primary disabled:opacity-50"
+                >
+                  <Clock className="size-3 text-muted-foreground" aria-hidden="true" />
+                  <span>{item.query}</span>
+                  <span className="text-[10px] text-muted-foreground">({formatHistoryDate(item.date).split(' ')[0]})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeHistoryItem(item.id)}
+                  aria-label={`Remover ${item.query} do histórico`}
+                  className="rounded-full p-0.5 text-muted-foreground transition hover:bg-destructive/15 hover:text-destructive"
+                >
+                  <X className="size-3" aria-hidden="true" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Sugestões Rápidas Globais */}
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
         <span className="text-xs text-muted-foreground">Sugestões rápidas:</span>
@@ -174,6 +347,7 @@ export function SearchPanel({
               if (s.country && onCountryChange) {
                 onCountryChange(s.country)
               }
+              recordSearch(s.label)
               onScan(s.label)
             }}
             className="btn-press hover-lift inline-flex items-center gap-1.5 rounded-full border border-border bg-background/50 px-3 py-1 text-xs transition hover:border-primary/50 hover:bg-accent disabled:opacity-50"
