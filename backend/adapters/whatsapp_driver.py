@@ -13,6 +13,7 @@ logger = logging.getLogger("WhatsAppDriver")
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
 SESSION_DIR = os.path.join(BACKEND_DIR, ".wpp_session")
+SESSION_DIR_2 = os.path.join(BACKEND_DIR, ".wpp_session_2")
 AUTH_MARKER = os.path.join(SESSION_DIR, ".authenticated")
 
 
@@ -125,18 +126,26 @@ class WhatsAppDriver:
                     "--disable-infobars",
                 ]
 
-                # Tenta abrir com channel chrome ou fallback para chromium
+                use_headless = sys.platform != "win32" or os.environ.get("DOCKER_HEADLESS") == "1"
+                ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
+                # Tenta abrir com channel chrome (Windows) ou chromium headless (Linux/Docker)
                 try:
+                    if use_headless:
+                        raise RuntimeError("Linux/Docker usa chromium headless diretamente")
                     self._context = await self._playwright.chromium.launch_persistent_context(
                         user_data_dir=self.session_dir,
                         channel="chrome",
                         headless=False,
+                        user_agent=ua,
                         args=launch_args,
                     )
                 except Exception:
                     self._context = await self._playwright.chromium.launch_persistent_context(
                         user_data_dir=self.session_dir,
-                        headless=False,
+                        headless=use_headless,
+                        user_agent=ua,
+                        viewport={"width": 1280, "height": 800},
                         args=launch_args,
                     )
 
@@ -394,5 +403,10 @@ class WhatsAppDriver:
             await self._cleanup_browser()
 
 
-# Instância global singleton do driver
-whatsapp_driver = WhatsAppDriver()
+# Instâncias globais dos drivers: Conta 1 (Principal) e Conta 2 (Empresa)
+whatsapp_driver = WhatsAppDriver(session_dir=SESSION_DIR)
+whatsapp_driver_2 = WhatsAppDriver(session_dir=SESSION_DIR_2)
+
+
+def get_whatsapp_driver(account: int = 1) -> WhatsAppDriver:
+    return whatsapp_driver_2 if account == 2 else whatsapp_driver

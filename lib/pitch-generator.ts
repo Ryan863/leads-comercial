@@ -309,9 +309,14 @@ export function isInternationalLead(address?: string, name?: string): boolean {
 
 export function extractCityFromAddress(address: string): string | null {
   if (!address) return null
-  const match = address.match(/(?:[-—,]\s*)([A-Za-zÀ-ú\s]{3,28})\s*-\s*[A-Z]{2}\b/i)
+  const match = address.match(
+    /(?:[-—,]\s*)([A-Za-zÀ-ú][A-Za-zÀ-ú\s]{2,28}?)\s*(?:[-–—]\s*|,\s*)(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/i,
+  )
   if (match && match[1]) {
-    return match[1].trim()
+    const candidate = match[1].trim()
+    if (!/^(?:rua|av\.?|avenida|rod\.?|rodovia|travessa|alameda|estrada|sala|apto?|bloco|lote|quadra)\b/i.test(candidate)) {
+      return candidate
+    }
   }
   return null
 }
@@ -321,11 +326,25 @@ function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase()
 }
 
+const COMMON_SHORT_PT_WORDS = new Set([
+  'de', 'da', 'do', 'das', 'dos', 'em', 'no', 'na', 'nos', 'nas', 'com', 'por', 'para',
+  'sul', 'boa', 'bom', 'sao', 'são', 'luz', 'sol', 'mar', 'lar', 'paz', 'cor', 'pao', 'pão',
+  'cha', 'chá', 'bar', 'pet', 'spa', 'top', 'max', 'pro', 'art', 'new', 'big', 'mix',
+  'uno', 'duo', 'tri', 'via', 'box', 'eco', 'bio', 'fit', 'med', 'vet', 'tec', 'net', 'web',
+  'app', 'doc', 'dom', 'san', 'ana', 'leo', 'rui', 'gil', 'ivo', 'casa', 'vida', 'auto',
+  'mais', 'bem', 'real', 'nova', 'novo', 'alta', 'alto', 'ouro', 'arte', 'rede', 'loja',
+  'sala', 'obra', 'vale', 'vila', 'bela', 'belo', 'azul', 'rosa', 'verde', 'puro', 'pura',
+])
+
 function toCleanTitleCase(text: string): string {
   if (!text) return ''
   const restored = restorePortugueseAccents(text.trim())
   const smallWords = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'com', 'para', 'por', 'no', 'na'])
-  const keepUpper = new Set(['sc', 'sp', 'pr', 'rs', 'rj', 'mg', 'ba', 'df', 'go', 'mt', 'ms', 'ce', 'pe', 'es', 'br', 'vip', '3d', '24h', 'cfc', 'cnh', 'mm', 'jm', 'jp', 'jr', 'dr', 'dra', 'ii', 'iii', 'iv', 'xv'])
+  const keepUpper = new Set([
+    'sc', 'sp', 'pr', 'rs', 'rj', 'mg', 'ba', 'df', 'go', 'mt', 'ms', 'ce', 'pe', 'es', 'br',
+    'vip', '3d', '24h', 'cfc', 'cnh', 'mm', 'jm', 'jp', 'jr', 'ii', 'iii', 'iv', 'xv',
+    'ti', 'rh', 'b2b', 'crea', 'cau', 'oab', 'crm', 'cro', 'crp', 'crn', 'crefito',
+  ])
 
   return restored
     .split(/\s+/)
@@ -333,6 +352,10 @@ function toCleanTitleCase(text: string): string {
       const cleanWord = word.toLowerCase()
       if (keepUpper.has(cleanWord)) return cleanWord.toUpperCase()
       if (index > 0 && smallWords.has(cleanWord)) return cleanWord
+      // Preserva siglas curtas em maiúsculas (ex: EFX, SEP, PARF, MRV, JBS)
+      if (/^[A-Z]{2,4}$/.test(word) && !COMMON_SHORT_PT_WORDS.has(cleanWord)) {
+        return word
+      }
       if (word.includes("'")) {
         return word
           .split("'")
@@ -344,12 +367,34 @@ function toCleanTitleCase(text: string): string {
     .join(' ')
 }
 
+const NOT_PERSON_WORDS = new Set([
+  'clínica', 'clinica', 'studio', 'estúdio', 'estudio', 'espaço', 'espaco', 'centro',
+  'instituto', 'consultório', 'consultorio', 'oficina', 'salão', 'salao', 'auto', 'prime',
+  'elite', 'nova', 'bela', 'santa', 'são', 'sao', 'dom', 'dona', 'vila', 'casa', 'ponto',
+  'civil', 'elétrico', 'eletrico', 'elétrica', 'eletrica', 'eletricista', 'mecânico', 'mecanico',
+  'mecânica', 'mecanica', 'ambiental', 'florestal', 'químico', 'quimico', 'agrônomo', 'agronomo',
+  'segurança', 'seguranca', 'trabalho', 'produção', 'producao', 'imóveis', 'imoveis', 'imobiliário',
+  'imobiliario', 'imobiliária', 'imobiliaria', 'urbanista', 'clínico', 'clinico', 'infantil',
+  'esportivo', 'esportiva', 'trabalhista', 'previdenciário', 'previdenciario', 'criminal',
+  'criminalista', 'empresarial', 'tributário', 'tributario', 'geral', 'obras', 'projetos',
+  'serviços', 'servicos', 'consultoria', 'engenharia', 'arquitetura', 'escritório', 'escritorio',
+  'assessoria', 'soluções', 'solucoes', 'construtora', 'construções', 'construcoes', 'grupo',
+  'equipe', 'pessoal', 'rede', 'loja', 'comércio', 'comercio', 'empresa', 'empresas',
+  'de', 'da', 'do', 'das', 'dos', 'e', 'em', 'para', 'com', 'por',
+])
+
+const PROFESSION_ONLY_REGEX =
+  /^(?:dra?\.?|doutor(?:a)?|eng(?:enheir[ao])?\.?|arquitet[ao]|corretor(?:a)?|advogad[ao]|psic[oó]log[ao]|nutri(?:cionista)?|fisioterapeuta|dentista|m[eé]dic[ao]|veterin[aá]ri[ao]|contad[oa]r(?:a)?|fot[oó]graf[ao]|personal|prof(?:essor[ao])?\.?)(?:\s+(?:civil|el[eé]tric[ao]|eletricista|mec[aâ]nic[ao]|ambiental|florestal|qu[ií]mic[ao]|agr[oô]nom[ao]|urbanista|cl[ií]nic[ao]|infantil|esportiv[ao]|trabalhista|previdenci[aá]ri[ao]|criminal(?:ista)?|empresarial|tribut[aá]ri[ao]|imobili[aá]ri[ao]|geral|de|da|do|e|em|im[oó]veis|seguran[cç]a|trabalho|produ[cç][aã]o|obras|projetos))*$/i
+
+const TRAILING_PREPOSITION_REGEX = /\s+(?:de|da|do|das|dos|e|&|em|para|com|por|no|na|[-–—/])$/i
+
 /**
  * Analisa o nome do lead para extrair um destinatário humanizado, limpo e gramaticalmente impecável:
  * - Remove sufixos societários (LTDA, ME, EIRELI, EPP, S/A)
  * - Remove nomes de cidades/UF pendurados no final do título (ex: "The Best Açaí - Videira", "Eskimó Sorvetes Videira")
- * - Identifica profissionais liberais ("Dra. Letícia", "Dr. Marcos", "Camila")
- * - Identifica gênero correto do estabelecimento ("pessoal da Sorveteria Italiana", "pessoal da Estação Açaí", "pessoal do Studio Auto")
+ * - Identifica profissionais liberais mesmo com especialidades (ex: "Engenheira Civil e de Segurança do Trabalho Saionara Vargas" -> "Saionara", "Engenheiro Civil - Giovani L. Serafini" -> "Giovani", "Gabriel Herkert Corretor de Imóveis" -> "Gabriel")
+ * - Nunca trunca deixando preposições soltas no final ("Corretor de", "Arquitetura e")
+ * - Identifica gênero correto do estabelecimento ("pessoal da Sorveteria Italiana", "pessoal da Potenzza Engenharia", "pessoal do Studio Auto")
  */
 export function extractRecipient(name: string, address?: string): { type: 'person' | 'business'; display: string; cleanName: string } {
   let clean = restorePortugueseAccents((name || '').trim())
@@ -362,10 +407,24 @@ export function extractRecipient(name: string, address?: string): { type: 'perso
     .replace(/\s+\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}.*$/, '')
     .trim()
 
-  // 2. Remove complementos após separadores (-, –, —, |, •, :)
-  const separatorParts = clean.split(/\s*(?:[-–—|•:]|\s+-\s+)\s*/)
-  if (separatorParts.length > 1 && separatorParts[0].trim().length >= 3) {
-    clean = separatorParts[0].trim()
+  // 2. Analisa separadores (-, –, —, |, •, :) sem descartar nomes quando a 1ª parte é só profissão
+  const separatorParts = clean.split(/\s*(?:[-–—|•:]|\s+-\s+)\s*/).map((p) => p.trim()).filter(Boolean)
+  let suffixIndicatesPerson = false
+  if (separatorParts.length > 1) {
+    const firstPart = separatorParts[0]
+    const secondPart = separatorParts[1]
+    if (PROFESSION_ONLY_REGEX.test(firstPart) && secondPart.length >= 3) {
+      // Ex: "Engenheiro Civil - Giovani L. Serafini"
+      clean = `${firstPart} ${secondPart}`
+    } else {
+      if (PROFESSION_ONLY_REGEX.test(secondPart)) {
+        // Ex: "Luiz Otávio Pimenta - Engenheiro Civil"
+        suffixIndicatesPerson = true
+      }
+      if (firstPart.length >= 3) {
+        clean = firstPart
+      }
+    }
   }
 
   // 3. Remove cidade ou UF no final mesmo quando sem traço (ex: "Eskimó Sorvetes Videira", "Sorveteria Polar SC")
@@ -377,36 +436,61 @@ export function extractRecipient(name: string, address?: string): { type: 'perso
 
   clean = clean
     .replace(
-      /\s+\b(?:videira|ca[cç]ador|joa[cç]aba|fraiburgo|chapec[oó]|curitibanos|lages|florian[oó]polis|floripa|joinville|blumenau|itaja[ií]|curitiba|s[aã]o paulo|porto alegre|salvador|belo horizonte|rio de janeiro|sc|sp|pr|rs|mg|rj|ba)\b\s*$/i,
+      /\s+\b(?:videira|ca[cç]ador|joa[cç]aba|fraiburgo|chapec[oó]|curitibanos|lages|jaragu[aá]\s+do\s+sul|florian[oó]polis|floripa|joinville|blumenau|itaja[ií]|curitiba|s[aã]o paulo|porto alegre|salvador|belo horizonte|rio de janeiro|sc|sp|pr|rs|mg|rj|ba)\b\s*$/i,
       '',
     )
     .trim()
 
-  // 4. Títulos explícitos de pessoas físicas (Dra, Dr, Doutor, Doutora, Nutricionista, Psicólogo(a), Advogado(a), etc.)
-  const titleMatch = clean.match(
-    /^(?:dra?\.?|doutor(?:a)?|dr\b|dra\b|nutri(?:cionista)?|psic[oó]log[ao]|advogad[ao]|arquiteto?a?|eng(?:enheir[ao])?|prof(?:essor[ao])?|fisioterapeuta|dentista|fonoaudi[oó]log[ao])\s+([A-Za-zÀ-ú]+)/i,
-  )
-  if (titleMatch && titleMatch[1]) {
-    const rawPrefix = titleMatch[0].toLowerCase()
-    const firstName = capitalize(titleMatch[1])
-    if (/^dra\b|doutora\b|psic[oó]loga|advogada|fisioterapeuta|nutricionista/i.test(rawPrefix)) {
-      const isDoc = /^dra\b|doutora\b|advogada|dentista/i.test(rawPrefix)
-      return { type: 'person', display: isDoc ? `Dra. ${firstName}` : firstName, cleanName: toCleanTitleCase(clean) }
+  // Se o sufixo após "-" era claramente profissão individual (ex: "Luiz Otávio Pimenta - Engenheiro Civil")
+  if (suffixIndicatesPerson) {
+    const firstWordMatch = clean.match(/^([A-Za-zÀ-ú]{3,})\b/)
+    if (firstWordMatch && !NOT_PERSON_WORDS.has(firstWordMatch[1].toLowerCase())) {
+      return {
+        type: 'person',
+        display: capitalize(firstWordMatch[1]),
+        cleanName: toCleanTitleCase(clean),
+      }
     }
-    if (/^dr\b|doutor\b|advogado\b/i.test(rawPrefix)) {
-      return { type: 'person', display: `Dr. ${firstName}`, cleanName: toCleanTitleCase(clean) }
-    }
-    return { type: 'person', display: firstName, cleanName: toCleanTitleCase(clean) }
   }
 
-  // 5. Nome próprio seguido de especialidade (ex: "Camila Fisioterapia", "Lucas Barber", "Mariana Nutrição")
+  // 4. Títulos explícitos de pessoas físicas, pulando especialidades intermediárias
+  // Ex: "Engenheira Civil e de Segurança do Trabalho Saionara Vargas" -> "Saionara"
+  // Ex: "Dra. Letícia Silva" -> "Dra. Letícia"
+  const titlePrefixMatch = clean.match(
+    /^(dra?\.?|doutor(?:a)?|nutri(?:cionista)?|psic[oó]log[ao]|advogad[ao]|arquitet[ao]|eng(?:enheir[ao])?\.?|prof(?:essor[ao])?\.?|fisioterapeuta|dentista|fonoaudi[oó]log[ao]|corretor(?:a)?|m[eé]dic[ao]|veterin[aá]ri[ao]|contad[oa]r(?:a)?|fot[oó]graf[ao])\b\s*(.*)$/i,
+  )
+  if (titlePrefixMatch && titlePrefixMatch[2]) {
+    const rawPrefix = titlePrefixMatch[1].toLowerCase()
+    let remainder = titlePrefixMatch[2].trim()
+
+    // Remove qualificadores/especialidades logo após o título (ex: "Civil e de Segurança do Trabalho", "de Imóveis", "Clínica")
+    remainder = remainder
+      .replace(
+        /^(?:(?:civil|el[eé]tric[ao]|eletricista|mec[aâ]nic[ao]|ambiental|florestal|qu[ií]mic[ao]|agr[oô]nom[ao]|urbanista|cl[ií]nic[ao]|infantil|esportiv[ao]|trabalhista|previdenci[aá]ri[ao]|criminal(?:ista)?|empresarial|tribut[aá]ri[ao]|imobili[aá]ri[ao]|geral|seguran[cç]a|trabalho|produ[cç][aã]o|im[oó]veis|e|de|da|do|das|dos|em|para|[-–—/|])\s+)+/i,
+        '',
+      )
+      .trim()
+
+    const candidateMatch = remainder.match(/^([A-Za-zÀ-ú]{3,})\b/)
+    if (candidateMatch && !NOT_PERSON_WORDS.has(candidateMatch[1].toLowerCase())) {
+      const firstName = capitalize(candidateMatch[1])
+      if (/^dra\.?$|^doutora$/i.test(rawPrefix)) {
+        return { type: 'person', display: `Dra. ${firstName}`, cleanName: toCleanTitleCase(remainder) }
+      }
+      if (/^dr\.?$|^doutor$/i.test(rawPrefix)) {
+        return { type: 'person', display: `Dr. ${firstName}`, cleanName: toCleanTitleCase(remainder) }
+      }
+      return { type: 'person', display: firstName, cleanName: toCleanTitleCase(remainder) }
+    }
+  }
+
+  // 5. Nome próprio seguido de especialidade/profissão (ex: "Gabriel Herkert Corretor de Imóveis", "Camila Fisioterapia", "Lucas Barber")
   const personMatch = clean.match(
-    /^([A-Za-zÀ-ú]{3,})\s+(?:[A-Za-zÀ-ú]{3,}\s+)?(?:fisioterapia|fisio|nutri|nutri[cç][aã]o|advocacia|advogad[ao]|psic[oó]log[ao]|psicologia|barber|barbeiro|tatuador|personal|arquiteto?a?|arquitetura|odontologia|dentista|podologia|est[eé]tica\s+facial)\b/i,
+    /^([A-Za-zÀ-ú]{3,})(?:\s+[A-Za-zÀ-ú]{2,}){0,2}\s+(?:corretor(?:a)?(?:\s+de\s+im[oó]veis)?|engenheir[ao](?:\s+civil)?|eng\.?\s+civil|fisioterapia|fisio|nutri|nutri[cç][aã]o|advocacia|advogad[ao]|psic[oó]log[ao]|psicologia|barber|barbeiro|tatuador|personal|arquitet[ao]|arquitetura|odontologia|dentista|podologia|est[eé]tica\s+facial|fot[oó]graf[ao])\b/i,
   )
   if (personMatch && personMatch[1]) {
     const firstWord = personMatch[1].toLowerCase()
-    const notPersonWords = new Set(['clínica', 'clinica', 'studio', 'estúdio', 'estudio', 'espaço', 'espaco', 'centro', 'instituto', 'consultório', 'consultorio', 'oficina', 'salão', 'salao', 'auto', 'prime', 'elite', 'nova', 'bela', 'santa', 'são', 'sao', 'dom', 'dona', 'vila', 'casa', 'ponto'])
-    if (!notPersonWords.has(firstWord)) {
+    if (!NOT_PERSON_WORDS.has(firstWord)) {
       return { type: 'person', display: capitalize(personMatch[1]), cleanName: toCleanTitleCase(clean) }
     }
   }
@@ -420,20 +504,24 @@ export function extractRecipient(name: string, address?: string): { type: 'perso
     businessName = words.slice(0, 4).join(' ')
   }
 
+  // Nunca deixa preposição ou conjunção pendurada no final (ex: "Corretor de", "Arquitetura e")
+  while (TRAILING_PREPOSITION_REGEX.test(businessName) && businessName.split(/\s+/).length > 1) {
+    businessName = businessName.replace(TRAILING_PREPOSITION_REGEX, '').trim()
+  }
+
   // Se já começa com preposição (ex: "Do Zé", "Da Villa", "De Minas")
   if (/^(?:de|da|do|dos|das)\s+/i.test(businessName)) {
     return { type: 'business', display: `equipe ${businessName}`, cleanName: businessName }
   }
 
   // Detecta gênero feminino com cobertura ampla da língua portuguesa:
-  // Qualquer estabelecimento começando ou contendo substantivo feminino principal (-aria, -eria, clínica, estética, oficina, loja, etc.)
   const startsFeminine =
-    /^(?:cl[íi]nica|sorveteria|gelateria|a[cç]aiteria|paleteria|pizzaria|hamburgueria|forneria|padaria|panificadora|confeitaria|doceria|pastelaria|churrascaria|cafeteria|lanchonete|espetaria|creperia|brigaderia|choperia|cervejaria|petiscaria|galeteria|peixaria|marmitaria|mec[âa]nica|auto\s*mec[âa]nica|auto\s*el[ée]trica|oficina|borracharia|funilaria|ret[íi]fica|lava[cç][ãa]o|est[ée]tica|barbearia|escola|autoescola|academia|vidra[çc]aria|marmoraria|serralheria|marcenaria|carpintaria|tape[çc]aria|estofaria|refrigera[çc][ãa]o|climatiza[çc][ãa]o|floricultura|[óo]tica|[óo]ptica|lavanderia|tinturaria|gr[áa]fica|drogaria|farm[áa]cia|imobili[áa]ria|construtora|empreiteira|incorporadora|arquitetura|engenharia|contabilidade|advocacia|assessoria|consultoria|corretora|seguradora|locadora|concession[áa]ria|revenda|garagem|transportadora|dedetizadora|desentupidora|assist[êe]ncia|ag[êe]ncia|produtora|casa|cabana|pousada|fazenda|est[aâ]ncia|ch[áa]cara|hospedagem|hospedaria|vila|est[aá][cç][ãa]o|distribuidora|adega|conveni[êe]ncia|mercearia|quitanda|frutaria|loja|boutique|sapataria|joalheria|relojoaria|papelaria|livraria|tabacaria|bicicletaria|agropecu[áa]ria|creche|fisioterapia|odontologia|psicologia|nutri[cç][ãa]o|podologia|terapia|massoterapia|bella|la\s+|santa|nossa\s+senhora|dona)\b/i.test(
+    /^(?:cl[íi]nica|sorveteria|gelateria|a[cç]aiteria|paleteria|pizzaria|hamburgueria|forneria|padaria|panificadora|confeitaria|doceria|pastelaria|churrascaria|cafeteria|lanchonete|espetaria|creperia|brigaderia|choperia|cervejaria|petiscaria|galeteria|peixaria|marmitaria|mec[âa]nica|auto\s*mec[âa]nica|auto\s*el[ée]trica|oficina|borracharia|funilaria|ret[íi]fica|lava[cç][ãa]o|est[ée]tica|barbearia|escola|autoescola|academia|vidra[çc]aria|marmoraria|serralheria|marcenaria|carpintaria|tape[çc]aria|estofaria|refrigera[çc][ãa]o|climatiza[çc][ãa]o|floricultura|[óo]tica|[óo]ptica|lavanderia|tinturaria|gr[áa]fica|drogaria|farm[áa]cia|imobili[áa]ria|im[oó]veis|construtora|constru[cç][oõ]es|empreiteira|incorporadora|arquitetura|engenharia|contabilidade|advocacia|assessoria|consultoria|corretora|seguradora|locadora|concession[áa]ria|revenda|garagem|transportadora|dedetizadora|desentupidora|assist[êe]ncia|ag[êe]ncia|produtora|casa|cabana|pousada|fazenda|est[aâ]ncia|ch[áa]cara|hospedagem|hospedaria|vila|est[aá][cç][ãa]o|distribuidora|adega|conveni[êe]ncia|mercearia|quitanda|frutaria|loja|boutique|sapataria|joalheria|relojoaria|papelaria|livraria|tabacaria|bicicletaria|agropecu[áa]ria|creche|fisioterapia|odontologia|psicologia|nutri[cç][ãa]o|podologia|terapia|massoterapia|bella|la\s+|santa|nossa\s+senhora|dona)\b/i.test(
       businessName,
     )
 
   const containsFeminineCore =
-    /\b(?:sorveteria|sorvetes|gelateria|pizzaria|hamburgueria|padaria|confeitaria|doceria|lanchonete|cafeteria|barbearia|cl[íi]nica|est[ée]tica|oficina|mec[âa]nica|imobili[áa]ria|vidra[çc]aria|marmoraria|serralheria|marcenaria|farm[áa]cia|drogaria|[óo]tica|floricultura|lavanderia|gr[áa]fica|academia|escola|autoescola|pousada|cabana)\b/i.test(
+    /\b(?:sorveteria|sorvetes|gelateria|pizzaria|hamburgueria|padaria|confeitaria|doceria|lanchonete|cafeteria|barbearia|cl[íi]nica|est[ée]tica|oficina|mec[âa]nica|imobili[áa]ria|im[oó]veis|vidra[çc]aria|marmoraria|serralheria|marcenaria|farm[áa]cia|drogaria|[óo]tica|floricultura|lavanderia|gr[áa]fica|academia|escola|autoescola|pousada|cabana|engenharia|arquitetura|construtora|constru[cç][oõ]es|consultoria|assessoria|contabilidade|advocacia|corretora|transportadora|solu[cç][oõ]es|incorporadora|empreiteira|terraplenagem|topografia)\b/i.test(
       businessName,
     ) && !/^(?:studio|est[uú]dio|espa[cç]o|centro|instituto|grupo|imp[eé]rio|ponto|recanto|ref[uú]gio|posto|atelier|ateli[eê]|sal[aã]o|consult[oó]rio|escrit[oó]rio|hospital|laborat[oó]rio|hotel|supermercado|mercado|a[cç]ougue|dep[oó]sito|shopping)\b/i.test(businessName)
 
@@ -446,6 +534,22 @@ export function extractRecipient(name: string, address?: string): { type: 'perso
     cleanName: businessName,
   }
 }
+
+function normalizeForCompare(text: string): string {
+  return (text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+}
+
+const BRAZILIAN_STATES_NAMES = new Set([
+  'acre', 'alagoas', 'amapa', 'amazonas', 'bahia', 'ceara', 'distrito federal',
+  'espirito santo', 'goias', 'maranhao', 'mato grosso', 'mato grosso do sul',
+  'minas gerais', 'para', 'paraiba', 'parana', 'pernambuco', 'piaui',
+  'rio de janeiro', 'rio grande do norte', 'rio grande do sul', 'rondonia',
+  'roraima', 'santa catarina', 'sao paulo', 'sergipe', 'tocantins', 'brasil', 'brazil',
+])
 
 export function extractLocationHook(address: string, isSameCity: boolean, leadCity: string | null): string {
   if (!address || address.length < 4) {
@@ -462,15 +566,21 @@ export function extractLocationHook(address: string, isSameCity: boolean, leadCi
     .map((s) => s.trim())
     .filter(Boolean)
 
+  const normLeadCity = leadCity ? normalizeForCompare(leadCity) : ''
+
   let streetFull = ''
   let neighborhood = ''
 
   for (const seg of segments) {
+    const normSeg = normalizeForCompare(seg)
+
     if (
+      !normSeg ||
       /^\d+$/.test(seg) ||
       /\d{5}/.test(seg) ||
-      /^(sc|sp|pr|rs|mg|rj|ba|ce|pe|df|go|es|mt|ms|am|pa|rn|pb|al|se|ro|ac|ap|rr|to)$/i.test(seg) ||
-      (leadCity && seg.toLowerCase() === leadCity.toLowerCase())
+      /^(?:ac|al|ap|am|ba|ce|df|es|go|ma|mt|ms|mg|pa|pb|pr|pe|pi|rj|rn|rs|ro|rr|sc|sp|se|to)$/i.test(normSeg) ||
+      BRAZILIAN_STATES_NAMES.has(normSeg) ||
+      (normLeadCity && normSeg === normLeadCity)
     ) {
       continue
     }
@@ -490,11 +600,24 @@ export function extractLocationHook(address: string, isSameCity: boolean, leadCi
       continue
     }
 
-    if (streetFull && !neighborhood && !/^\d+/.test(seg) && seg.length >= 3) {
-      const cleanedNeigh = seg.replace(/^(?:bairro|no|na)\s+/i, '').trim()
-      if (!/^(?:shopping|sala|loja|bloco|andar|centro)\b/i.test(cleanedNeigh)) {
-        neighborhood = toCleanTitleCase(cleanedNeigh)
+    if (streetFull && !neighborhood) {
+      // Rejeita qualquer complemento com números (ex: "E 410", "Apto 22", "Sala 05", "410-E", "Km 5")
+      if (/\d/.test(seg) || seg.length < 3) {
+        continue
       }
+      const cleanedNeigh = seg.replace(/^(?:bairro|no|na)\s+/i, '').trim()
+      const normNeigh = normalizeForCompare(cleanedNeigh)
+      if (
+        cleanedNeigh.length < 3 ||
+        (normLeadCity && normNeigh === normLeadCity) ||
+        BRAZILIAN_STATES_NAMES.has(normNeigh) ||
+        /^(?:shopping|sala|sl|loja|lj|bloco|bl|andar|apto?|ap|edif[ií]cio|ed|condom[ií]nio|lote|lt|quadra|qd|fundos|sobreloja|t[eé]rreo|subsolo|anexo|box|galp[aã]o|pavimento|galeria|torre|conjunto|cj|centro|s\/n|sn)\b/i.test(
+          cleanedNeigh,
+        )
+      ) {
+        continue
+      }
+      neighborhood = toCleanTitleCase(cleanedNeigh)
       break
     }
   }
@@ -1432,36 +1555,48 @@ export function buildPresentation(
   const name = (senderName || '').trim() || (activePersona === 'ryan' ? 'Ryan' : '')
   const hasName = name.length > 0
   const city = (senderCity || '').trim()
-  const customRole = (senderRole || '').trim()
+  const customRole = (senderRole || '')
+    .trim()
+    .replace(/\bcrios\b/gi, 'crio')
+    .replace(/\s+/g, ' ')
+
+  // Garante rótulo de nicho em minúsculo no meio da frase (preservando siglas como TI, CNH, 3D)
+  const labelForSentence = specialtyLabel
+    ? specialtyLabel
+        .trim()
+        .split(/\s+/)
+        .map((w) => (/^(?:TI|RH|CNH|3D|LED|VIP|B2B|PCD|CLT)$/i.test(w) ? w.toUpperCase() : w.toLowerCase()))
+        .join(' ')
+    : 'negócios locais'
 
   // 1. Caso seja da MESMA CIDADE (fala que mora/é dali)
   if (isSameCity && city) {
     if (activePersona === 'rvll') {
       const rvllLocalVariants = [
-        `Somos uma equipe de desenvolvimento web aqui em ${city}, criamos sites modernos e práticos com foco em pedidos e agendamentos no WhatsApp para ${specialtyLabel}.`,
-        `Aqui é da equipe de desenvolvimento web em ${city}, desenvolvemos sites modernos e rápidos com foco em clientes no WhatsApp para ${specialtyLabel} aqui da cidade.`,
+        `Somos uma equipe de desenvolvimento web aqui em ${city}, criamos sites modernos e práticos com foco em pedidos e agendamentos no WhatsApp para ${labelForSentence}.`,
+        `Aqui é da equipe de desenvolvimento web em ${city}, desenvolvemos sites modernos e rápidos com foco em clientes no WhatsApp para ${labelForSentence} aqui da cidade.`,
       ]
       return rvllLocalVariants[variationIndex % rvllLocalVariants.length]
     }
 
     const rolePart = customRole || 'desenvolvedor web'
-    const cleanRole = rolePart.startsWith('sou ') ? rolePart.slice(4).trim() : rolePart.trim()
-    const hasSitesMention = /\b(?:crio|criando|fa[cç]o|fazendo|desenvolvo|desenvolvendo)\b/i.test(cleanRole)
+    const cleanRole = rolePart.replace(/^sou\s+/i, '').trim()
+    const hasSitesMention = /\b(?:crio|crios|criando|fa[cç]o|fazendo|desenvolvo|desenvolvendo|site|sites|p[aá]gina|p[aá]ginas|landing)\b/i.test(cleanRole)
 
     const devLocalVariants = [
       hasName
         ? (hasSitesMention
-            ? `Meu nome é ${name}, sou ${cleanRole} para ${specialtyLabel} aqui em ${city}.`
-            : `Meu nome é ${name}, sou ${cleanRole} aqui em ${city} e crio sites modernos e práticos para ${specialtyLabel} da nossa região.`)
+            ? `Meu nome é ${name}, sou ${cleanRole} para ${labelForSentence} aqui em ${city}.`
+            : `Meu nome é ${name}, sou ${cleanRole} aqui em ${city} e crio sites modernos e práticos para ${labelForSentence} da nossa região.`)
         : (hasSitesMention
-            ? `Sou ${cleanRole} para ${specialtyLabel} aqui em ${city}.`
-            : `Sou ${cleanRole} aqui em ${city} e crio sites modernos e práticos para ${specialtyLabel} da nossa região.`),
+            ? `Sou ${cleanRole} para ${labelForSentence} aqui em ${city}.`
+            : `Sou ${cleanRole} aqui em ${city} e crio sites modernos e práticos para ${labelForSentence} da nossa região.`),
       hasName
-        ? `Sou o ${name}, trabalho como desenvolvedor web aqui em ${city} criando sites focados em atrair clientes e contatos no WhatsApp para ${specialtyLabel}.`
-        : `Trabalho como desenvolvedor web aqui em ${city} criando sites focados em atrair clientes e contatos no WhatsApp para ${specialtyLabel}.`,
+        ? `Sou o ${name}, trabalho como desenvolvedor web aqui em ${city} criando sites focados em atrair clientes e contatos no WhatsApp para ${labelForSentence}.`
+        : `Trabalho como desenvolvedor web aqui em ${city} criando sites focados em atrair clientes e contatos no WhatsApp para ${labelForSentence}.`,
       hasName
-        ? `Meu nome é ${name}, atuo aqui de ${city} e desenvolvo sites profissionais e rápidos para ${specialtyLabel}.`
-        : `Sou desenvolvedor web aqui na região e desenvolvo sites profissionais e rápidos para ${specialtyLabel}.`,
+        ? `Meu nome é ${name}, atuo aqui de ${city} e desenvolvo sites profissionais e rápidos para ${labelForSentence}.`
+        : `Sou desenvolvedor web aqui na região e desenvolvo sites profissionais e rápidos para ${labelForSentence}.`,
     ]
     return devLocalVariants[variationIndex % devLocalVariants.length]
   }
@@ -1469,30 +1604,30 @@ export function buildPresentation(
   // 2. Caso NÃO SEJA DA CIDADE DELE
   if (activePersona === 'rvll') {
     const rvllRemoteVariants = [
-      `Somos uma equipe de desenvolvimento web especializada em criar sites modernos e rápidos para ${specialtyLabel}, focados em converter visitas do Google em clientes no WhatsApp.`,
-      `Trabalhamos desenvolvendo sites modernos e práticos com foco em clientes e orçamentos diretos no WhatsApp para ${specialtyLabel}.`,
+      `Somos uma equipe de desenvolvimento web especializada em criar sites modernos e rápidos para ${labelForSentence}, focados em converter visitas do Google em clientes no WhatsApp.`,
+      `Trabalhamos desenvolvendo sites modernos e práticos com foco em clientes e orçamentos diretos no WhatsApp para ${labelForSentence}.`,
     ]
     return rvllRemoteVariants[variationIndex % rvllRemoteVariants.length]
   }
 
   const rolePart = customRole || 'desenvolvedor web'
-  const cleanRole = rolePart.startsWith('sou ') ? rolePart.slice(4).trim() : rolePart.trim()
-  const hasSitesMention = /\b(?:crio|criando|fa[cç]o|fazendo|desenvolvo|desenvolvendo)\b/i.test(cleanRole)
+  const cleanRole = rolePart.replace(/^sou\s+/i, '').trim()
+  const hasSitesMention = /\b(?:crio|crios|criando|fa[cç]o|fazendo|desenvolvo|desenvolvendo|site|sites|p[aá]gina|p[aá]ginas|landing)\b/i.test(cleanRole)
 
   const devRemoteVariants = [
     hasName
       ? (hasSitesMention
-          ? `Meu nome é ${name}, sou ${cleanRole} para ${specialtyLabel}.`
-          : `Meu nome é ${name}, sou ${cleanRole} e crio sites modernos e práticos para ${specialtyLabel}.`)
+          ? `Meu nome é ${name}, sou ${cleanRole} para ${labelForSentence}.`
+          : `Meu nome é ${name}, sou ${cleanRole} e crio sites modernos e práticos para ${labelForSentence}.`)
       : (hasSitesMention
-          ? `Sou ${cleanRole} para ${specialtyLabel}.`
-          : `Sou ${cleanRole} e trabalho criando sites modernos e de alto padrão para ${specialtyLabel}.`),
+          ? `Sou ${cleanRole} para ${labelForSentence}.`
+          : `Sou ${cleanRole} e trabalho criando sites modernos e de alto padrão para ${labelForSentence}.`),
     hasName
-      ? `Sou o ${name}, trabalho como desenvolvedor web fazendo sites focados em transformar quem busca no Google em clientes no WhatsApp para ${specialtyLabel}.`
-      : `Sou desenvolvedor web e crio sites profissionais focados em transformar buscas no Google em clientes no WhatsApp para ${specialtyLabel}.`,
+      ? `Sou o ${name}, trabalho como desenvolvedor web fazendo sites focados em transformar quem busca no Google em clientes no WhatsApp para ${labelForSentence}.`
+      : `Sou desenvolvedor web e crio sites profissionais focados em transformar buscas no Google em clientes no WhatsApp para ${labelForSentence}.`,
     hasName
-      ? `Meu nome é ${name}, atuo como desenvolvedor web criando sites rápidos e otimizados para celular para ${specialtyLabel}.`
-      : `Trabalho como desenvolvedor web desenvolvendo sites modernos, rápidos e adaptados para celular para ${specialtyLabel}.`,
+      ? `Meu nome é ${name}, atuo como desenvolvedor web criando sites rápidos e otimizados para celular para ${labelForSentence}.`
+      : `Trabalho como desenvolvedor web desenvolvendo sites modernos, rápidos e adaptados para celular para ${labelForSentence}.`,
   ]
   return devRemoteVariants[variationIndex % devRemoteVariants.length]
 }
@@ -1908,9 +2043,10 @@ export function generatePitch(
 
   const diagnosisAndValue = buildNicheDiagnosis(specialty, scenarioKey, location, recipient.cleanName)
 
-  // 4. Pergunta de fechamento suave (Soft CTA)
-  const ctaTarget = recipient.type === 'person' ? 'você' : `a ${recipient.cleanName}`
-  const ctaTargetPronoun = recipient.type === 'person' ? 'você' : 'vocês'
+  // 4. Pergunta de fechamento suave (Soft CTA) com concordância verbal exata (singular vs plural)
+  const isPerson = recipient.type === 'person'
+  const ctaTargetPronoun = isPerson ? 'você' : 'vocês'
+  const ctaLookPhrase = isPerson ? 'você dar uma olhada' : 'vocês darem uma olhada'
   let cta = ''
 
   if (tone === 'preview') {
@@ -1922,14 +2058,14 @@ export function generatePitch(
   } else if (tone === 'direct') {
     const directVariants = [
       `Teria interesse em ver um modelo simples sem compromisso nenhum?`,
-      `Posso te enviar um esboço rápido de como ficaria essa página no celular para ${ctaTargetPronoun} darem uma olhada?`,
+      `Posso te enviar um esboço rápido de como ficaria essa página no celular para ${ctaLookPhrase}?`,
     ]
     cta = directVariants[variationIndex % directVariants.length]
   } else {
     const ctaVariants = [
       `Faz sentido eu te mandar uma prévia simples sem compromisso de como ficaria essa estrutura para ${ctaTargetPronoun}?`,
       `Se fizer sentido, posso gravar um vídeo rápido de 1 minuto mostrando como ficaria essa vitrine na prática para ${ctaTargetPronoun}.`,
-      `Teria interesse em dar uma olhada em um modelo simples e sem compromisso pensado para ${ctaTarget}?`,
+      `Teria interesse em dar uma olhada em um modelo simples e sem compromisso pensado para ${ctaTargetPronoun}?`,
     ]
     cta = ctaVariants[variationIndex % ctaVariants.length]
   }

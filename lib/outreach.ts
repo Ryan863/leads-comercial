@@ -34,6 +34,10 @@ export type OutreachStatusResponse = {
   is_running: boolean
   stop_requested: boolean
   started_at: string | null
+  scheduled_for?: string | null
+  waiting_for_schedule?: boolean
+  shutdown_on_complete?: boolean
+  active_account?: number
   keep_awake_active: boolean
   countdown_seconds: number | null
   batch_sent_count: number
@@ -78,8 +82,15 @@ export async function syncLeadsToOutreach(leads: Lead[]): Promise<{
   return res.json()
 }
 
-export async function startOutreach(): Promise<{ status: string; message: string }> {
-  const res = await fetch('/api/backend/outreach/start', {
+export async function startOutreach(
+  scheduledTime?: string,
+  shutdownOnComplete = false,
+): Promise<{ status: string; scheduled_for?: string | null; shutdown_on_complete?: boolean; message: string }> {
+  const params = new URLSearchParams()
+  if (scheduledTime) params.set('scheduled_time', scheduledTime)
+  if (shutdownOnComplete) params.set('shutdown_on_complete', 'true')
+  const query = params.toString() ? `?${params.toString()}` : ''
+  const res = await fetch(`/api/backend/outreach/start${query}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   })
@@ -146,16 +157,16 @@ export type WhatsAppStatus = {
   message?: string
 }
 
-export async function fetchWhatsAppStatus(): Promise<WhatsAppStatus> {
-  const res = await fetch('/api/backend/outreach/whatsapp/status', { cache: 'no-store' })
+export async function fetchWhatsAppStatus(account: 1 | 2 = 1): Promise<WhatsAppStatus> {
+  const res = await fetch(`/api/backend/outreach/whatsapp/status?account=${account}`, { cache: 'no-store' })
   if (!res.ok) {
     throw new Error('Falha ao obter status do WhatsApp')
   }
   return res.json()
 }
 
-export async function connectWhatsApp(): Promise<{ success: boolean; status: string; message: string }> {
-  const res = await fetch('/api/backend/outreach/whatsapp/connect', {
+export async function connectWhatsApp(account: 1 | 2 = 1): Promise<{ success: boolean; status: string; message: string }> {
+  const res = await fetch(`/api/backend/outreach/whatsapp/connect?account=${account}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   })
@@ -166,8 +177,8 @@ export async function connectWhatsApp(): Promise<{ success: boolean; status: str
   return res.json()
 }
 
-export async function disconnectWhatsApp(): Promise<{ success: boolean; message: string }> {
-  const res = await fetch('/api/backend/outreach/whatsapp/disconnect', {
+export async function disconnectWhatsApp(account: 1 | 2 = 1): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`/api/backend/outreach/whatsapp/disconnect?account=${account}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   })

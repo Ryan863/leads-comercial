@@ -43,6 +43,8 @@ backend/whatsapp_session/
 whatsapp_session/
 backend/.wpp_session/
 .wpp_session/
+backend/.wpp_session_2/
+.wpp_session_2/
 
 # V0 / Sandbox
 __v0_*
